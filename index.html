@@ -1,26 +1,23 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="referrer" content="no-referrer">
-<title>TICKEY Lab · BLE connection test</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>TICKEY Lab · Bluetooth photos</title>
 <style>
-:root{font-family:system-ui,sans-serif;color:#172f36;background:#eef3f2}*{box-sizing:border-box}body{margin:0;padding:24px 16px}main{max-width:620px;margin:24px auto;background:white;padding:28px;border-radius:20px}h1{font-size:1.8rem;margin-top:8px}p,li{line-height:1.6}.tag{font-size:.8rem;font-weight:700;letter-spacing:.12em;color:#416567}button{font:inherit;font-weight:650;border:0;border-radius:10px;padding:15px;background:#155f58;color:white;cursor:pointer;min-height:48px}button:disabled{opacity:.45;cursor:default}.actions{display:grid;gap:12px;margin:24px 0}.secondary{background:#e2eeeb;color:#183d37}#status{padding:16px;background:#eef3f2;border-radius:10px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem;line-height:1.5;max-height:230px;overflow:auto}.note{font-size:.9rem;color:#425b61}footer{border-top:1px solid #dce5e3;margin-top:24px;padding-top:12px}
-</style>
-</head>
-<body><main>
-<div class="tag">TICKEY LAB / STEP 1</div>
-<h1>Bluetooth connection test</h1>
-<p>Open this page in <strong>Bluefy on your iPhone</strong>. This tests your existing BLE firmware. Photo transfer is not included yet.</p>
-<ol><li>Disconnect TICKEY-BLE in nRF Connect.</li><li>Power the ESP32. If discovery has expired, send <code>b</code> in Serial Monitor, or press the board’s RESET button. Do not reset during a display refresh.</li><li>Connect below and choose <strong>TICKEY-BLE</strong>.</li></ol>
+:root{font-family:system-ui,sans-serif;color:#172f36;background:#eef3f2}*{box-sizing:border-box}body{margin:0;padding:24px 16px}main{max-width:620px;margin:12px auto;background:white;padding:24px;border-radius:20px}h1{font-size:1.8rem;margin-top:8px}p,li{line-height:1.6}.tag{font-size:.8rem;font-weight:700;letter-spacing:.12em;color:#416567}button,select,input{font:inherit;max-width:100%}button{font-weight:650;border:0;border-radius:10px;padding:15px;background:#155f58;color:white;cursor:pointer;min-height:48px}button:disabled{opacity:.45;cursor:default}.actions{display:grid;gap:12px;margin:20px 0}.secondary{background:#e2eeeb;color:#183d37}#status,#message{padding:12px;background:#eef3f2;border-radius:10px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem;max-height:180px;overflow:auto}.note{font-size:.9rem;color:#425b61}label{display:block;margin:14px 0}input[type=range],canvas,progress{width:100%}canvas{border:1px solid #bbc9c6;height:auto;image-rendering:pixelated}fieldset{border:0;padding:0;min-width:0}footer{border-top:1px solid #dce5e3;margin-top:24px;padding-top:12px}
+</style></head><body><main>
+<div class="tag">TICKEY LAB / IMG1</div><h1>Bluetooth photos</h1>
+<p><strong>New firmware required:</strong> upload <code>epaper_ble_images</code> once. Open this page in Bluefy. Keep the screen awake and this tab in front while sending.</p>
+<p class="note">Disconnect nRF Connect first. If discovery expires, send <code>b</code> in Serial Monitor or reset the board while the panel is idle.</p>
+<div class="actions"><button id="connect">Connect to TICKEY-BLE</button><button id="read" class="secondary" disabled>Read device status</button><button id="disconnect" class="secondary" disabled>Disconnect / stop transfer</button></div>
 <p id="status" role="status" aria-live="polite">Not connected.</p>
-<div class="actions">
-<button id="connect">Connect to TICKEY-BLE</button>
-<button id="read" class="secondary" disabled>Read device status</button>
-<button id="send" disabled>Display “Hello Fariz!”</button>
-<button id="disconnect" class="secondary" disabled>Disconnect</button>
-</div>
-<p class="note">The display button sends <code>B:Hello Fariz!</code> once and replaces the current image with black text. Wait for the panel to finish, then read status again. A successful Bluetooth write alone does not prove the panel refreshed.</p>
+<fieldset id="editor"><label>Choose photo (JPEG/PNG, up to 10 MiB)<input id="photo" type="file" accept="image/jpeg,image/png"></label>
+<label>Palette <select id="palette"><option value="bw">Black and white</option><option value="red">Black, white and red</option></select></label>
+<label>Horizontal crop <input id="cropX" type="range" min="0" max="100" value="50"></label>
+<label>Vertical crop <input id="cropY" type="range" min="0" max="100" value="50"></label>
+<label>Zoom <input id="zoom" type="range" min="1" max="3" step="0.05" value="1"></label>
+<canvas id="cropCanvas" width="296" height="128" hidden></canvas><canvas id="preview" width="296" height="128" aria-label="Prepared e-paper image preview"></canvas></fieldset>
+<p id="message" role="status">Choose a photo. Nothing is sent until you tap Send photo.</p>
+<progress id="progress" max="9472" value="0" aria-label="Image transfer progress"></progress>
+<div class="actions"><button id="send" disabled>Send photo over Bluetooth</button></div>
+<p class="note">A transfer changes the current picture only after validation. Disconnecting before commit discards the partial image. Once panel refresh starts, disconnecting cannot undo it. A progress bar reaching 100% does not mean the panel is finished.</p>
 <details><summary>Test log</summary><pre id="log"></pre></details>
-<footer class="note">No analytics, photo uploads or third-party scripts. GitHub serves this page; commands travel directly over Bluetooth. The current lab firmware does not authenticate nearby clients. This is an independent learning prototype, not an official TICKEY app.</footer>
-</main><script src="app.js"></script></body></html>
+<footer class="note">No analytics or photo uploads. Processing stays on your phone; bytes travel directly to the ESP32. GitHub serves only this page. Lab BLE has no authenticated pairing. Independent learning prototype, not an official TICKEY app.</footer>
+</main><script src="photo_codec.js?v=img1"></script><script src="ble_images.js?v=img1"></script><script src="app.js?v=img1"></script></body></html>

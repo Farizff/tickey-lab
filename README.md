@@ -1,13 +1,36 @@
-# TICKEY Lab — BLE connection gate
+# TICKEY Lab — Bluetooth photos (IMG1)
 
-Independent learning prototype; not an official TICKEY app.
+Independent learning prototype, not an official TICKEY app.
 
-Open the GitHub Pages site in Bluefy on iPhone. With the existing TICKEY-BLE Nordic UART lab firmware, connect, read status, and explicitly send `B:Hello Fariz!`. The command replaces the current panel content. No photo transfer is implemented yet.
+Open https://farizff.github.io/tickey-lab/ in Bluefy on iPhone. Requires the separate **epaper_ble_images** firmware, not the older BLE text sketch. Firmware is kept locally and uploaded by the hardware owner; this repository contains only the sender and tests.
 
-No dependencies, telemetry, credentials, photos or firmware are included. GitHub serves static files; BLE commands go directly from browser to the selected device. Firmware pairing is not authenticated. Keep the test nearby and supervised.
+1. Upload the matching sketch once. Disconnect nRF Connect.
+2. Keep Bluefy foreground and the phone awake. Connect to TICKEY-BLE. Discovery lasts two minutes; reopen with serial `b` or reset while the panel is idle.
+3. Choose JPEG/PNG (10 MiB, 20 megapixels maximum); crop, zoom and choose black/white or black/white/red.
+4. Send photo. Wait for **FINISHED**, not merely 100%. Transfer duration and panel refresh duration are separate.
+5. Send a second image without reflashing. If a transfer fails, disconnect/reconnect before retrying. No automatic retries or background/resumable transfers.
 
-## Verification
+Photo preparation stays in the browser. No backend, analytics, third-party scripts, credentials or photo storage. GitHub hosts static files; image bytes go straight over BLE. Lab firmware has no authenticated pairing; nearby clients may connect while discoverable. No battery/NFC/OTA/Wi-Fi integration in this milestone.
 
-Run `node --test app.test.cjs`. Tests use mocked browser/BLE objects and do not prove iPhone or hardware compatibility. Physical acceptance requires the user to connect in Bluefy, read a status, send the command, observe the correct text, and read FINISHED after refresh.
+## IMG1 wire protocol
 
-Discovery in the existing firmware lasts two minutes; disconnect nRF Connect first and reopen discovery through Serial Monitor (`b`) or reset while the display is idle. No new sketch is required.
+Nordic UART service `6e400001-b5a3-f393-e0a9-e50e24dcca9e`; RX `...0002...` WRITE with response, TX `...0003...` READ (notifications optional, not used by this sender). Every write is at most 20 bytes. All integers are little endian; transfer IDs are nonzero random u32.
+
+- BEGIN (17 bytes): opcode u8=1, id u32, width u16=296, height u16=128, palette u8=2 or 3, length u16=9472, CRC32 u32, version u8=1.
+- DATA (8–20 bytes): opcode u8=2, id u32, byte offset u16, 1–13 payload bytes.
+- COMMIT (5 bytes): opcode u8=3, id u32.
+- ABORT (5 bytes): opcode u8=4, id u32. The UI cancels by disconnecting instead.
+
+Packed row-major 2-bit pixels, most-significant pair first: white=0, black=1, red=2 (only palette3); code3 invalid. Standard reflected CRC32 polynomial 0xedb88320, initial/final xor 0xffffffff.
+
+Sender waits for BEGIN acknowledgement and validates acknowledged offsets every 16 data frames plus final data frame. All GATT operations are serialized. Browser operations have an 8-second timeout; ACK wait 5 seconds; panel wait 45 seconds. Firmware discards partial transfer after 30 seconds without accepted data.
+
+Status fits 20 bytes: `IMG1:READY`, `RECV:hhhhhhhh:offset`, `VERIFIED:hhhhhhhh`, `REFRESH:hhhhhhhh`, `DONE:hhhhhhhh:ms`, `ERR:hhhhhhhh:code`, `ABORT:hhhhhhhh`. IDs in status are lowercase hexadecimal. `VERIFIED` may be immediately replaced by `REFRESH` before a read; either proves commit accepted. Only matching-ID DONE reports completion. Panel duration is firmware-measured; transfer duration includes protocol acknowledgement overhead.
+
+Strict order: duplicate/missing/out-of-order offsets discard partial transfer. Invalid size/palette/checksum/premature commit never schedules a refresh. Wrong IDs and competing BEGIN leave the owning buffer intact and return an error. Queued/refreshing buffers ignore all incoming writes and retain status, so new IDs cannot obtain BEGIN acknowledgement. Disconnect clears receiving/queued state; a physical refresh already in progress runs to completion. Rejected transfers do not touch the physical panel. A panel hardware fault blocks new updates until reset; physical partial refresh cannot be rolled back.
+
+## Verification and limitations
+
+`node --test app.test.cjs` exercises binary sender, mocked GATT/UI, palette conversion and failures. No mocked test proves radio/iPhone/panel behavior. Local companion firmware has native C++ receiver tests, JS-to-C++ byte-for-byte integration tests and Arduino compilation.
+
+The earlier text command worked physically in Bluefy. **Photo transfer, interruption recovery and timings on actual iPhone/ESP32 remain pending user testing.** Current webpage replaces the initial text-only test; the tested old firmware remains preserved locally.
