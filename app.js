@@ -47,10 +47,11 @@ el('send').addEventListener('click',()=>run(async()=>{
   });
   report(`FINISHED. Transfer ${(result.transferMs/1000).toFixed(1)} s; panel refresh ${(result.panelMs/1000).toFixed(1)} s. You can send more text or another photo without reflashing.`);
 }));
-function photoError(message){prepared=null;el('message').textContent=message;update();}
+function photoError(message){++textRevision;prepared=null;el('message').textContent=message;update();}
 function renderPhoto(){
   prepared=null;
   if(el('mode').value==='text'){renderText();return;}
+  for(const id of ['cropCanvas','preview']){el(id).width=296;el(id).height=128;el(id).style.maxWidth='';}
   if(!sourceImage){update();return;}
   try{
     const box=PhotoCodec.crop(sourceImage.naturalWidth,sourceImage.naturalHeight,Number(el('cropX').value),Number(el('cropY').value),Number(el('zoom').value));
@@ -79,21 +80,37 @@ el('photo').addEventListener('change',async()=>{
   }catch(error){if(revision===epoch)photoError('Cannot prepare photo: '+error.message);}
   finally{if(url)URL.revokeObjectURL(url);}
 });
-function renderText(){
-  prepared=null;el('preview').getContext('2d').clearRect(0,0,296,128);
+let textDocument=RichText.create(),selection={start:0,end:0},textRevision=0;
+const styleControls={textSize:'size',textFont:'family',textColor:'color',textBold:'bold',textItalic:'italic',textUnderline:'underline',textStrike:'strike'};
+function currentStyle(){return RichText.style({size:Number(el('textSize').value),family:el('textFont').value,color:el('textColor').value,bold:el('textBold').checked,italic:el('textItalic').checked,underline:el('textUnderline').checked,strike:el('textStrike').checked});}
+function retainSelection(){
+  selection={start:el('text').selectionStart,end:el('text').selectionEnd};
+  const count=selection.end-selection.start;
+  el('selectionStatus').textContent=count?`${count} selected characters: formatting applies only to this selection.`:'No selection: formatting applies to the whole message and new text.';
+}
+async function renderText(){
+  const revision=++textRevision,modeEpoch=epoch;
+  prepared=null;const preview=el('preview');preview.getContext('2d').clearRect(0,0,preview.width,preview.height);update();
   try{
-    const color=el('textColor').value;
-    const result=TextCodec.render(el('cropCanvas').getContext('2d',{willReadFrequently:true}),el('text').value,color,{
-      background:el('textBackground').value,size:Number(el('textSize').value),family:el('textFont').value,align:el('textAlign').value,
-      bold:el('textBold').checked,italic:el('textItalic').checked,underline:el('textUnderline').checked,strike:el('textStrike').checked});
-    const codes=result.codes;
-    const encoded=PhotoCodec.encode(codes),decoded=PhotoCodec.decode(encoded);
-    prepared={bytes:Uint8Array.from(encoded.slice(22).match(/../g),b=>parseInt(b,16)),palette:codes.includes(2)?3:2};
-    el('preview').getContext('2d').putImageData(new ImageData(PhotoCodec.preview(decoded),296,128),0,0);
-    if(result.sameColor){prepared=null;el('message').textContent='Text and background are the same colour. Choose different colours before sending.';}
-    else if(result.overflow){prepared=null;el('message').textContent=`Text does not fit: ${result.lines.length} lines, room for ${result.maxLines}. Preview is clipped; reduce size or shorten text. Sending is blocked.`;}
-    else el('message').textContent=`Text preview ready: ${result.lines.length}/${result.maxLines} lines. Tap Send text when ready.`;
-  }catch(error){el('message').textContent=error.message;}
+    currentStyle(); // Reject incomplete/invalid toolbar values, never reuse an older valid payload.
+    const doc=textDocument,options={background:el('textBackground').value,align:el('textAlign').value,orientation:Number(el('textOrientation').value)};
+    el('message').textContent='Loading fonts and preparing text…';
+    await RichText.loadFonts(doc,document.fonts);
+    if(revision!==textRevision||modeEpoch!==epoch||el('mode').value!=='text')return;
+    const result=RichText.render(el('cropCanvas').getContext('2d',{willReadFrequently:true}),doc,options);
+    const encoded=PhotoCodec.encode(result.codes),decoded=PhotoCodec.decode(encoded);
+    // Preview is reconstructed from transmitted bytes, inverse-mapped to upright reading view.
+    const logical=RichText.fromWire(decoded,options.orientation);
+    preview.width=result.width;preview.height=result.height;
+    preview.style.maxWidth=result.width===128?'256px':'';
+    preview.getContext('2d').putImageData(new ImageData(PhotoCodec.preview(logical),result.width,result.height),0,0);
+    if(result.sameColor)el('message').textContent='Some text matches the background colour. Choose contrasting colours before sending.';
+    else if(result.overflow)el('message').textContent='Text does not fit. Preview is clipped; reduce size or shorten text. Sending is blocked.';
+    else {
+      prepared={bytes:Uint8Array.from(encoded.slice(22).match(/../g),b=>parseInt(b,16)),palette:decoded.includes(2)?3:2};
+      el('message').textContent=`Text preview ready: ${result.lines.length} lines, ${result.width} × ${result.height}. Tap Send text when ready.`;
+    }
+  }catch(error){if(revision===textRevision&&modeEpoch===epoch)el('message').textContent=error.message;}
   update();
 }
 el('mode').addEventListener('change',()=>{
@@ -106,7 +123,37 @@ el('mode').addEventListener('change',()=>{
   el('message').textContent='Choose a photo. Nothing is sent until you tap Send photo.';
   renderPhoto();
 });
-for(const id of ['text','textColor','textBackground','textSize','textFont','textAlign','textBold','textItalic','textUnderline','textStrike'])el(id).addEventListener('input',renderText);
+for(const event of ['select','keyup','pointerup','touchend','blur'])el('text').addEventListener(event,retainSelection);
+document.addEventListener('selectionchange',()=>{if(document.activeElement===el('text'))retainSelection();});
+// Capture before focus moves to native iPhone selects/number inputs.
+el('textControls').addEventListener('pointerdown',()=>{if(document.activeElement===el('text'))retainSelection();},true);
+let beforeEdit=null;
+el('text').addEventListener('beforeinput',()=>{beforeEdit={start:el('text').selectionStart,end:el('text').selectionEnd,text:textDocument.text};});
+el('text').addEventListener('input',()=>{
+  try{
+    const text=el('text').value,s=currentStyle(),b=beforeEdit;
+    const added=b?text.length-(b.text.length-(b.end-b.start)):-1;
+    if(b&&added>=0&&text.slice(0,b.start)===b.text.slice(0,b.start)&&text.slice(b.start+added)===b.text.slice(b.end))textDocument=RichText.replace(textDocument,b.start,b.end,text.slice(b.start,b.start+added),s);
+    else textDocument=RichText.edit(textDocument,text,s);
+    beforeEdit=null;retainSelection();renderText();
+  }catch(error){photoError(error.message);}
+});
+el('text').addEventListener('paste',event=>{
+  if(!event.clipboardData)return;
+  event.preventDefault();
+  const text=event.clipboardData.getData('text/plain').replace(/\r\n?/g,'\n');
+  const input=el('text'),start=input.selectionStart,end=input.selectionEnd;
+  if(input.value.length-(end-start)+text.length>2000){photoError('Use at most 2000 characters.');return;}
+  beforeEdit={start,end,text:textDocument.text};input.setRangeText(text,start,end,'end');input.dispatchEvent(new Event('input',{bubbles:true}));
+});
+for(const [id,key] of Object.entries(styleControls))el(id).addEventListener('input',()=>{
+  try{
+    const value=currentStyle()[key],{start,end}=selection;
+    textDocument=RichText.apply(textDocument,start===end?0:start,start===end?textDocument.text.length:end,{[key]:value});
+    renderText();
+  }catch(error){++textRevision;photoError(error.message);}
+});
+for(const id of ['textBackground','textAlign','textOrientation'])el(id).addEventListener('input',renderText);
 for(const id of ['cropX','cropY','zoom','palette'])el(id).addEventListener('input',renderPhoto);
 if(!supported)report('Open this HTTPS page in Bluefy and allow Bluetooth access.');
 update();
