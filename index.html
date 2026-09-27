@@ -14,7 +14,8 @@
 <label>Font size (pixels) <input id="textSize" type="number" min="8" max="48" value="20"></label>
 <label>Font <select id="textFont"><option value="sans-serif">Sans-serif</option><option value="serif">Serif</option><option value="monospace">Monospace</option></select></label>
 <label>Alignment <select id="textAlign"><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option></select></label>
-<label>Text colour <select id="textColor"><option value="black">Black</option><option value="red">Red</option></select></label>
+<label>Text colour <select id="textColor"><option value="black">Black</option><option value="white">White</option><option value="red">Red</option></select></label>
+<label>Background colour <select id="textBackground"><option value="white">White</option><option value="black">Black</option><option value="red">Red</option></select></label>
 <div><label><input id="textBold" type="checkbox"> Bold</label><label><input id="textItalic" type="checkbox"> Italic</label><label><input id="textUnderline" type="checkbox"> Underline</label><label><input id="textStrike" type="checkbox"> Strikethrough</label></div>
 <p class="note">Formatting applies to the whole message. Preview below is the actual 296 × 128 screen image and updates as you type. Font availability varies by phone; emoji may not reproduce well. Overflow prevents sending.</p></div>
 <div id="photoControls"><label>Choose photo (JPEG/PNG, up to 10 MiB)<input id="photo" type="file" accept="image/jpeg,image/png"></label>
@@ -29,4 +30,4 @@
 <p class="note">A transfer changes the current picture only after validation. Disconnecting before commit discards the partial image. Once panel refresh starts, disconnecting cannot undo it. A progress bar reaching 100% does not mean the panel is finished.</p>
 <details><summary>Test log</summary><pre id="log"></pre></details>
 <footer class="note">No analytics or photo uploads. Processing stays on your phone; bytes travel directly to the ESP32. GitHub serves only this page. Lab BLE has no authenticated pairing. Independent learning prototype, not an official TICKEY app.</footer>
-</main><script src="photo_codec.js?v=img1"></script><script src="ble_images.js?v=img1"></script><script src="text_codec.js?v=text2"></script><script src="app.js?v=text2"></script></body></html>
+</main><script src="photo_codec.js?v=img1"></script><script src="ble_images.js?v=img1"></script><script src="text_codec.js?v=colors3"></script><script src="app.js?v=colors3"></script></body></html>

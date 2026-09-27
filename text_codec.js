@@ -4,7 +4,7 @@ const TextCodec=(()=>{
     if(typeof text!=='string'||!text.trim())throw Error('Enter some text.');
     if(text.length>2000)throw Error('Use at most 2000 characters.');
     if(/[\x00-\x08\x0b-\x1f\x7f]/.test(text))throw Error('Unsupported control character.');
-    if(!['black','red'].includes(color))throw Error('Choose black or red.');
+    if(!['black','white','red'].includes(color))throw Error('Choose black, white or red.');
   }
   function layout(ctx,text,options={}){
     const o={size:20,family:'sans-serif',align:'left',bold:false,italic:false,underline:false,strike:false,...options};
@@ -31,7 +31,9 @@ const TextCodec=(()=>{
   }
   function render(ctx,text,color,options={}){
     validate(text,color);const plan=layout(ctx,text,options),{o,lines,lineHeight,maxLines}=plan;
-    ctx.fillStyle='white';ctx.fillRect(0,0,296,128);ctx.fillStyle=color;
+    const background=options.background||'white';
+    if(!['white','black','red'].includes(background))throw Error('Invalid background.');
+    ctx.fillStyle=background;ctx.fillRect(0,0,296,128);ctx.fillStyle=color;
     ctx.textAlign=o.align;ctx.textBaseline='alphabetic';
     const x=o.align==='left'?10:o.align==='right'?286:148;
     lines.slice(0,maxLines).forEach((line,i)=>{
@@ -41,8 +43,12 @@ const TextCodec=(()=>{
       if(o.strike)ctx.fillRect(left,y-o.size*.32,width,Math.max(1,Math.round(o.size/16)));
     });
     const rgba=ctx.getImageData(0,0,296,128).data,codes=new Uint8Array(296*128);
-    for(let i=0;i<codes.length;i++)if((color==='red'?rgba[i*4+1]:rgba[i*4])<128)codes[i]=color==='red'?2:1;
-    return {...plan,codes};
+    const rgb={white:[255,255,255],black:[0,0,0],red:[255,0,0]},index={white:0,black:1,red:2};
+    for(let i=0;i<codes.length;i++){
+      const distance=name=>rgb[name].reduce((sum,v,c)=>sum+(rgba[i*4+c]-v)**2,0);
+      codes[i]=distance(color)<distance(background)?index[color]:index[background];
+    }
+    return {...plan,codes,sameColor:color===background};
   }
   return {validate,layout,render};
 })();
