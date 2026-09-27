@@ -1,4 +1,4 @@
-# TICKEY Lab — Bluetooth photos (IMG1)
+# TICKEY Lab — Bluetooth text + photos (IMG1)
 
 Independent learning prototype, not an official TICKEY app.
 
@@ -6,8 +6,8 @@ Open https://farizff.github.io/tickey-lab/ in Bluefy on iPhone. Requires the sep
 
 1. Upload the matching sketch once. Disconnect nRF Connect.
 2. Keep Bluefy foreground and the phone awake. Connect to TICKEY-BLE. Discovery lasts two minutes; reopen with serial `b` or reset while the panel is idle.
-3. Choose JPEG/PNG (10 MiB, 20 megapixels maximum); crop, zoom and choose black/white or black/white/red.
-4. Send photo. Wait for **FINISHED**, not merely 100%. Transfer duration and panel refresh duration are separate.
+3. Select Photo for JPEG/PNG (10 MiB, 20 megapixels maximum), crop/zoom and palette; or Text for 1–18 printable ASCII characters in black or red. Text is centered on white and rendered into pixels on the phone. Existing epaper_ble_images firmware works unchanged: no new flash needed.
+4. Send text/photo. Both use the full image transfer and shared busy lock. Wait for **FINISHED**, not merely 100%. Transfer duration and panel refresh duration are separate.
 5. Send a second image without reflashing. If a transfer fails, disconnect/reconnect before retrying. No automatic retries or background/resumable transfers.
 
 Photo preparation stays in the browser. No backend, analytics, third-party scripts, credentials or photo storage. GitHub hosts static files; image bytes go straight over BLE. Lab firmware has no authenticated pairing; nearby clients may connect while discoverable. No battery/NFC/OTA/Wi-Fi integration in this milestone.
@@ -31,6 +31,6 @@ Strict order: duplicate/missing/out-of-order offsets discard partial transfer. I
 
 ## Verification and limitations
 
-`node --test app.test.cjs` exercises binary sender, mocked GATT/UI, palette conversion and failures. No mocked test proves radio/iPhone/panel behavior. Local companion firmware has native C++ receiver tests, JS-to-C++ byte-for-byte integration tests and Arduino compilation.
+`node --test app.test.cjs text.test.cjs` exercises binary sender, mocked GATT/UI, text validation/packing, palette conversion and failures. No mocked test proves radio/iPhone/panel behavior. Local companion firmware has native C++ receiver tests, JS-to-C++ byte-for-byte integration tests and Arduino compilation. Combined UI was exercised in desktop Chromium at mobile width with real canvas rendering/photo decoding and mocked send completion; no overflow, correct red-only text pixels, invalidation, busy locking and persistent errors were checked.
 
-The earlier text command worked physically in Bluefy. **Photo transfer, interruption recovery and timings on actual iPhone/ESP32 remain pending user testing.** Current webpage replaces the initial text-only test; the tested old firmware remains preserved locally.
+User previously verified multiple photo uploads and reconnects. **Combined text → photo → text and reconnect acceptance remain pending physical iPhone/ESP32 testing.** Interrupted-transfer recovery remains deferred, not passed. Earlier firmware sketches remain preserved locally and unchanged.

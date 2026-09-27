@@ -12,7 +12,7 @@ function update(){
   el('disconnect').disabled=!(device&&device.gatt.connected);
   el('editor').disabled=working;
 }
-function clearConnection(){rx=tx=null;report('Disconnected. A partial transfer is discarded; an already-started refresh continues.');update();}
+function clearConnection(){rx=tx=null;if(!el('status').textContent.startsWith('Error:'))report('Disconnected. A partial transfer is discarded; an already-started refresh continues.');update();}
 async function bounded(promise){
   let timer;
   try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Bluetooth operation timed out')),8000);})]);}
@@ -45,11 +45,12 @@ el('send').addEventListener('click',()=>run(async()=>{
     el('progress').value=p.bytes;
     report(p.stage==='sending'?`Sending: ${p.bytes} / ${p.total} bytes`:`Image verified. Transfer ${(p.transferMs/1000).toFixed(1)} s. Waiting for panel…`);
   });
-  report(`FINISHED. Transfer ${(result.transferMs/1000).toFixed(1)} s; panel refresh ${(result.panelMs/1000).toFixed(1)} s. You can send another photo without reflashing.`);
+  report(`FINISHED. Transfer ${(result.transferMs/1000).toFixed(1)} s; panel refresh ${(result.panelMs/1000).toFixed(1)} s. You can send more text or another photo without reflashing.`);
 }));
 function photoError(message){prepared=null;el('message').textContent=message;update();}
 function renderPhoto(){
   prepared=null;
+  if(el('mode').value==='text'){renderText();return;}
   if(!sourceImage){update();return;}
   try{
     const box=PhotoCodec.crop(sourceImage.naturalWidth,sourceImage.naturalHeight,Number(el('cropX').value),Number(el('cropY').value),Number(el('zoom').value));
@@ -72,12 +73,34 @@ el('photo').addEventListener('change',async()=>{
   try{
     PhotoCodec.checkFile(file.size,new Uint8Array(await file.slice(0,8).arrayBuffer()));
     const image=new Image();url=URL.createObjectURL(file);image.src=url;await image.decode();
-    if(revision!==epoch)return;
+    if(revision!==epoch||el('mode').value!=='photo')return;
     if(image.naturalWidth<=0||image.naturalHeight<=0||image.naturalWidth*image.naturalHeight>20000000)throw Error('Use an image up to 20 megapixels');
     sourceImage=image;el('cropX').value='50';el('cropY').value='50';el('zoom').value='1';renderPhoto();
   }catch(error){if(revision===epoch)photoError('Cannot prepare photo: '+error.message);}
   finally{if(url)URL.revokeObjectURL(url);}
 });
+function renderText(){
+  prepared=null;el('preview').getContext('2d').clearRect(0,0,296,128);
+  try{
+    const color=el('textColor').value;
+    const codes=TextCodec.render(el('cropCanvas').getContext('2d',{willReadFrequently:true}),el('text').value,color);
+    const encoded=PhotoCodec.encode(codes),decoded=PhotoCodec.decode(encoded);
+    prepared={bytes:Uint8Array.from(encoded.slice(22).match(/../g),b=>parseInt(b,16)),palette:color==='red'?3:2};
+    el('preview').getContext('2d').putImageData(new ImageData(PhotoCodec.preview(decoded),296,128),0,0);
+    el('message').textContent='Text preview ready. Nothing is sent until you tap Send text.';
+  }catch(error){el('message').textContent=error.message;}
+  update();
+}
+el('mode').addEventListener('change',()=>{
+  ++epoch;prepared=null;
+  const text=el('mode').value==='text';
+  el('textControls').hidden=!text;el('photoControls').hidden=text;
+  el('send').textContent=text?'Send text over Bluetooth':'Send photo over Bluetooth';
+  el('preview').getContext('2d').clearRect(0,0,296,128);
+  el('message').textContent='Choose a photo. Nothing is sent until you tap Send photo.';
+  renderPhoto();
+});
+for(const id of ['text','textColor'])el(id).addEventListener('input',renderText);
 for(const id of ['cropX','cropY','zoom','palette'])el(id).addEventListener('input',renderPhoto);
 if(!supported)report('Open this HTTPS page in Bluefy and allow Bluetooth access.');
 update();
