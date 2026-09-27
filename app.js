@@ -83,11 +83,15 @@ function renderText(){
   prepared=null;el('preview').getContext('2d').clearRect(0,0,296,128);
   try{
     const color=el('textColor').value;
-    const codes=TextCodec.render(el('cropCanvas').getContext('2d',{willReadFrequently:true}),el('text').value,color);
+    const result=TextCodec.render(el('cropCanvas').getContext('2d',{willReadFrequently:true}),el('text').value,color,{
+      size:Number(el('textSize').value),family:el('textFont').value,align:el('textAlign').value,
+      bold:el('textBold').checked,italic:el('textItalic').checked,underline:el('textUnderline').checked,strike:el('textStrike').checked});
+    const codes=result.codes;
     const encoded=PhotoCodec.encode(codes),decoded=PhotoCodec.decode(encoded);
     prepared={bytes:Uint8Array.from(encoded.slice(22).match(/../g),b=>parseInt(b,16)),palette:color==='red'?3:2};
     el('preview').getContext('2d').putImageData(new ImageData(PhotoCodec.preview(decoded),296,128),0,0);
-    el('message').textContent='Text preview ready. Nothing is sent until you tap Send text.';
+    if(result.overflow){prepared=null;el('message').textContent=`Text does not fit: ${result.lines.length} lines, room for ${result.maxLines}. Preview is clipped; reduce size or shorten text. Sending is blocked.`;}
+    else el('message').textContent=`Text preview ready: ${result.lines.length}/${result.maxLines} lines. Tap Send text when ready.`;
   }catch(error){el('message').textContent=error.message;}
   update();
 }
@@ -95,12 +99,13 @@ el('mode').addEventListener('change',()=>{
   ++epoch;prepared=null;
   const text=el('mode').value==='text';
   el('textControls').hidden=!text;el('photoControls').hidden=text;
+  el(text?'textPreviewSlot':'photoPreviewSlot').appendChild(el('preview'));
   el('send').textContent=text?'Send text over Bluetooth':'Send photo over Bluetooth';
   el('preview').getContext('2d').clearRect(0,0,296,128);
   el('message').textContent='Choose a photo. Nothing is sent until you tap Send photo.';
   renderPhoto();
 });
-for(const id of ['text','textColor'])el(id).addEventListener('input',renderText);
+for(const id of ['text','textColor','textSize','textFont','textAlign','textBold','textItalic','textUnderline','textStrike'])el(id).addEventListener('input',renderText);
 for(const id of ['cropX','cropY','zoom','palette'])el(id).addEventListener('input',renderPhoto);
 if(!supported)report('Open this HTTPS page in Bluefy and allow Bluetooth access.');
 update();
