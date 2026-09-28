@@ -26,7 +26,7 @@ const RichText=(()=>{
     if(![0,90,180,270].includes(angle))throw Error('Invalid orientation.');
     return angle%180?{width:128,height:296}:{width:296,height:128};
   }
-  // A 180-degree hardware compensation is applied ONLY to text.
+  // Shared logical-to-panel mapping includes 180-degree hardware compensation.
   function toWire(codes,angle=0){
     const {width:w,height:h}=dimensions(angle),rotation=(angle+180)%360,out=new Uint8Array(296*128);
     if(codes.length!==w*h)throw Error('Invalid pixel dimensions.');
@@ -64,11 +64,11 @@ const RichText=(()=>{
     const {width,height}=dimensions(options.orientation||0),available=width-20;
     const segments=typeof Intl.Segmenter==='function'?[...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(doc.text)]:Array.from(doc.text).map((segment,i,a)=>({segment,index:a.slice(0,i).join('').length}));
     const lines=[];let line=[];
-    const finish=()=>{lines.push(line);line=[];};
+    const finish=(s=defaults)=>{line.emptySize=s.size;lines.push(line);line=[];};
     const measure=items=>items.reduce((sum,g)=>sum+g.width,0);
     for(const part of segments){
       const s=style(doc.styles[part.index]);
-      if(part.segment==='\n'||part.segment==='\r\n'){finish();continue;}
+      if(part.segment==='\n'||part.segment==='\r\n'){finish(s);continue;}
       const text=part.segment==='\t'?'    ':part.segment;ctx.font=font(s);
       const metrics=ctx.measureText(text),g={text,s,width:metrics.width,ascent:Math.max(s.size,metrics.actualBoundingBoxAscent||0),descent:Math.max(Math.ceil(s.size*.35),metrics.actualBoundingBoxDescent||0)};
       if(line.length&&measure(line)+g.width>available){
@@ -79,21 +79,33 @@ const RichText=(()=>{
       }
       line.push(g);
     }
-    finish();
+    finish(doc.styles.at(-1)||defaults);
     let y=8;
     const plans=lines.map(items=>{
-      const ascent=Math.max(0,...items.map(g=>g.ascent))||defaults.size;
-      const descent=Math.max(0,...items.map(g=>g.descent))||Math.ceil(defaults.size*.35);
+      const ascent=Math.max(0,...items.map(g=>g.ascent))||items.emptySize;
+      const descent=Math.max(0,...items.map(g=>g.descent))||Math.ceil(items.emptySize*.35);
       const plan={items,width:measure(items),baseline:y+ascent,top:y,height:ascent+descent};y+=plan.height;return plan;
     });
     return {lines:plans,width,height,overflow:y>height-8||plans.some(l=>l.width>available)};
+  }
+  function fit(ctx,doc,options={}){
+    let plan=layout(ctx,doc,options),effective=doc;
+    const maximum=Math.max(8,...doc.styles.map(s=>s.size));
+    // Recompute from originals on every render; never compound reductions or edit styles.
+    if(options.autoFit&&plan.overflow)for(let cap=maximum-1;cap>=8;cap--){
+      effective={text:doc.text,styles:doc.styles.map(s=>({...s,size:Math.max(8,Math.floor(s.size*cap/maximum))}))};
+      plan=layout(ctx,effective,options);
+      if(!plan.overflow)break;
+    }
+    const sizes=effective.styles.map(s=>s.size);
+    return {...plan,autoFitted:effective!==doc,effectiveMin:Math.min(...sizes),effectiveMax:Math.max(...sizes)};
   }
   function render(ctx,doc,options={}){
     if(!doc.text.trim())throw Error('Enter some text.');
     if(doc.text.length>2000||/[\x00-\x08\x0b-\x1f\x7f]/.test(doc.text))throw Error('Invalid text (maximum 2000 characters; no control characters).');
     const background=options.background||'white',align=options.align||'left';
     if(!['white','black','red'].includes(background)||!['left','center','right'].includes(align))throw Error('Invalid text settings.');
-    const plan=layout(ctx,doc,options),{width,height}=plan;
+    const plan=fit(ctx,doc,options),{width,height}=plan;
     ctx.canvas.width=width;ctx.canvas.height=height;
     ctx.fillStyle=background;ctx.fillRect(0,0,width,height);ctx.textBaseline='alphabetic';ctx.textAlign='left';
     for(const line of plan.lines){
@@ -116,6 +128,6 @@ const RichText=(()=>{
     const sameColor=plan.lines.some(l=>l.items.some(g=>g.text.trim()&&g.s.color===background));
     return {...plan,codes:toWire(codes,options.orientation||0),sameColor};
   }
-  return {families,defaults,style,create,apply,replace,edit,font,dimensions,toWire,fromWire,loadFonts,layout,render};
+  return {families,defaults,style,create,apply,replace,edit,font,dimensions,toWire,fromWire,loadFonts,layout,fit,render};
 })();
 if(typeof module!=='undefined')module.exports=RichText;

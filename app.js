@@ -59,24 +59,26 @@ function photoError(message){++textRevision;prepared=null;el('message').textCont
 function renderPhoto(){
   prepared=null;
   if(el('mode').value==='text'){renderText();return;}
-  for(const id of ['cropCanvas','preview']){el(id).width=296;el(id).height=128;el(id).style.maxWidth='';}
+  if(el('mode').value==='qr'){renderQR();return;}
+  const angle=Number(el('photoOrientation').value),{width,height}=RichText.dimensions(angle);
+  for(const id of ['cropCanvas','preview']){el(id).width=width;el(id).height=height;el(id).style.maxWidth=width===128?'256px':'';}
   if(!sourceImage){update();return;}
   try{
-    const box=PhotoCodec.crop(sourceImage.naturalWidth,sourceImage.naturalHeight,Number(el('cropX').value),Number(el('cropY').value),Number(el('zoom').value));
-    const ctx=el('cropCanvas').getContext('2d',{willReadFrequently:true});ctx.fillStyle='white';ctx.fillRect(0,0,296,128);ctx.drawImage(sourceImage,...box,0,0,296,128);
-    const red=el('palette').value==='red',codes=PhotoCodec.quantize(ctx.getImageData(0,0,296,128).data,red);
+    const box=PhotoCodec.crop(sourceImage.naturalWidth,sourceImage.naturalHeight,Number(el('cropX').value),Number(el('cropY').value),Number(el('zoom').value),width,height);
+    const ctx=el('cropCanvas').getContext('2d',{willReadFrequently:true});ctx.fillStyle='white';ctx.fillRect(0,0,width,height);ctx.drawImage(sourceImage,...box,0,0,width,height);
+    const red=el('palette').value==='red',codes=RichText.toWire(PhotoCodec.quantize(ctx.getImageData(0,0,width,height).data,red,width,height),angle);
     const encoded=PhotoCodec.encode(codes),decoded=PhotoCodec.decode(encoded);
     if(!codes.every((c,i)=>c===decoded[i]))throw Error('Preview encoding failed');
     const bytes=Uint8Array.from(encoded.slice(22).match(/../g),b=>parseInt(b,16));
     prepared={bytes,palette:red?3:2};
-    el('preview').getContext('2d').putImageData(new ImageData(PhotoCodec.preview(decoded),296,128),0,0);
+    el('preview').getContext('2d').putImageData(new ImageData(PhotoCodec.preview(RichText.fromWire(decoded,angle)),width,height),0,0);
     el('message').textContent='Preview ready. Tap Send photo when connected.';
   }catch(error){photoError(error.message);}
   update();
 }
 el('photo').addEventListener('change',async()=>{
   const revision=++epoch;sourceImage=null;prepared=null;update();
-  for(const id of ['cropCanvas','preview'])el(id).getContext('2d').clearRect(0,0,296,128);
+  for(const id of ['cropCanvas','preview'])el(id).getContext('2d').clearRect(0,0,el(id).width,el(id).height);
   const file=el('photo').files[0];if(!file){photoError('Choose a JPEG or PNG.');return;}
   el('message').textContent='Preparing on your phone…';let url;
   try{
@@ -101,7 +103,7 @@ async function renderText(){
   prepared=null;const preview=el('preview');preview.getContext('2d').clearRect(0,0,preview.width,preview.height);update();
   try{
     currentStyle(); // Reject incomplete/invalid toolbar values, never reuse an older valid payload.
-    const doc=textDocument,options={background:el('textBackground').value,align:el('textAlign').value,orientation:Number(el('textOrientation').value)};
+    const doc=textDocument,options={background:el('textBackground').value,align:el('textAlign').value,orientation:Number(el('textOrientation').value),autoFit:el('textAutoFit').checked};
     el('message').textContent='Loading fonts and preparing text…';
     await RichText.loadFonts(doc,document.fonts);
     if(revision!==textRevision||modeEpoch!==epoch||el('mode').value!=='text')return;
@@ -113,20 +115,32 @@ async function renderText(){
     preview.style.maxWidth=result.width===128?'256px':'';
     preview.getContext('2d').putImageData(new ImageData(PhotoCodec.preview(logical),result.width,result.height),0,0);
     if(result.sameColor)el('message').textContent='Some text matches the background colour. Choose contrasting colours before sending.';
-    else if(result.overflow)el('message').textContent='Text does not fit. Preview is clipped; reduce size or shorten text. Sending is blocked.';
+    else if(result.overflow)el('message').textContent='Text does not fit. '+(options.autoFit?'Even at the 8px minimum, ':'')+'Preview is clipped; reduce size or shorten text. Sending is blocked.';
     else {
       prepared={bytes:Uint8Array.from(encoded.slice(22).match(/../g),b=>parseInt(b,16)),palette:decoded.includes(2)?3:2};
       el('message').textContent=`Text preview ready: ${result.lines.length} lines, ${result.width} × ${result.height}. Tap Send text when ready.`;
+      if(result.autoFitted)el('message').textContent+=` Auto-fit reduced sizes to ${result.effectiveMin}–${result.effectiveMax}px; original sizes are preserved.`;
     }
   }catch(error){if(revision===textRevision&&modeEpoch===epoch)el('message').textContent=error.message;}
   update();
 }
+function renderQR(){
+  ++textRevision;prepared=null;
+  const preview=el('preview');preview.width=296;preview.height=128;preview.style.maxWidth='';
+  try{
+    const result=QRCodec.render(el('qrText').value),encoded=PhotoCodec.encode(RichText.toWire(result.codes,0)),decoded=PhotoCodec.decode(encoded);
+    preview.getContext('2d').putImageData(new ImageData(PhotoCodec.preview(RichText.fromWire(decoded,0)),296,128),0,0);
+    prepared={bytes:Uint8Array.from(encoded.slice(22).match(/../g),b=>parseInt(b,16)),palette:2};
+    el('message').textContent=`QR preview ready: ${result.modules} modules, ${result.scale}px per module, 4-module white border. Scan-check before use.`;
+  }catch(error){el('message').textContent=error.message;}
+  update();
+}
 el('mode').addEventListener('change',()=>{
   ++epoch;prepared=null;
-  const text=el('mode').value==='text';
-  el('textControls').hidden=!text;el('photoControls').hidden=text;
-  el(text?'textPreviewSlot':'photoPreviewSlot').appendChild(el('preview'));
-  el('send').textContent=text?'Send text over Bluetooth':'Send photo over Bluetooth';
+  const mode=el('mode').value;
+  for(const name of ['text','photo','qr'])el(name+'Controls').hidden=name!==mode;
+  el(mode+'PreviewSlot').appendChild(el('preview'));
+  el('send').textContent=`Send ${mode==='qr'?'QR':mode} over Bluetooth`;
   el('preview').getContext('2d').clearRect(0,0,296,128);
   el('message').textContent='Choose a photo. Nothing is sent until you tap Send photo.';
   renderPhoto();
@@ -161,7 +175,8 @@ for(const [id,key] of Object.entries(styleControls))el(id).addEventListener('inp
     renderText();
   }catch(error){++textRevision;photoError(error.message);}
 });
-for(const id of ['textBackground','textAlign','textOrientation'])el(id).addEventListener('input',renderText);
-for(const id of ['cropX','cropY','zoom','palette'])el(id).addEventListener('input',renderPhoto);
+for(const id of ['textBackground','textAlign','textOrientation','textAutoFit'])el(id).addEventListener('input',renderText);
+for(const id of ['cropX','cropY','zoom','palette','photoOrientation'])el(id).addEventListener('input',renderPhoto);
+el('qrText').addEventListener('input',renderQR);
 if(!supported)report('Open this HTTPS page in Bluefy and allow Bluetooth access.');
 update();
