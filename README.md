@@ -16,7 +16,7 @@ Photo preparation stays in the browser. No backend, analytics, third-party scrip
 
 ## IMG1 wire protocol
 
-Nordic UART service `6e400001-b5a3-f393-e0a9-e50e24dcca9e`; RX `...0002...` WRITE with response, TX `...0003...` READ (notifications optional, not used by this sender). Every write is at most 20 bytes. All integers are little endian; transfer IDs are nonzero random u32.
+Nordic UART service `6e400001-b5a3-f393-e0a9-e50e24dcca9e`; RX `...0002...` WRITE with response, TX `...0003...` READ (notifications optional, not used by this sender). Every legacy-mode write is at most 20 bytes (optional FAST1 extension below). All integers are little endian; transfer IDs are nonzero random u32.
 
 - BEGIN (17 bytes): opcode u8=1, id u32, width u16=296, height u16=128, palette u8=2 or 3, length u16=9472, CRC32 u32, version u8=1.
 - DATA (8–20 bytes): opcode u8=2, id u32, byte offset u16, 1–13 payload bytes.
@@ -31,9 +31,29 @@ Status fits 20 bytes: `IMG1:READY`, `RECV:hhhhhhhh:offset`, `VERIFIED:hhhhhhhh`,
 
 Strict order: duplicate/missing/out-of-order offsets discard partial transfer. Invalid size/palette/checksum/premature commit never schedules a refresh. Wrong IDs and competing BEGIN leave the owning buffer intact and return an error. Queued/refreshing buffers ignore all incoming writes and retain status, so new IDs cannot obtain BEGIN acknowledgement. Disconnect clears receiving/queued state; a physical refresh already in progress runs to completion. Rejected transfers do not touch the physical panel. A panel hardware fault blocks new updates until reset; physical partial refresh cannot be rolled back.
 
+## Optional FAST1 prototype
+
+The existing `epaper_ble_images` sketch still works, using 20-byte writes. The separate, manually installed `epaper_ble_fast` sketch advertises read-only characteristic `6e400004-b5a3-f393-e0a9-e50e24dcca9e` with exact value `FAST1:180`. Before each image the sender writes a non-image 180-byte probe: opcode 5, transfer ID u32 LE, then byte `i ^ idByte[i % 4]` for indices 5–179 (idByte starts at frame offset 1). Only matching `PROBE:hhhhhhhh:180` enables 180-byte frames (173 image bytes each). BEGIN/COMMIT, CRC, IDs, palette, refresh and timeout rules are unchanged. The receiver also accepts legacy DATA without a probe, preserving old-page compatibility.
+
+Absent/unknown capability uses legacy mode. Explicit probe-size rejection, `ERR:<id>:PROBE`, or missing/stale application probe ACK falls back before BEGIN. Operation timeouts, disconnects, network errors and other unexpected errors stop; no overlapping GATT retry or replay. Missing characteristic alone permits capability-discovery fallback. Fast mode is never remembered across reconnects. The page logs negotiated mode and reports it with separate transfer/panel timings. Transfer timing includes the probe, but not capability lookup. There is no measured phone/radio speed claim; panel refresh is unchanged.
+
 ## Verification and limitations
 
-`node --test app.test.cjs text.test.cjs rich_text.test.cjs`: 25 tests pass, none skipped. Tests cover binary sender, mocked GATT/UI, selected style/edit preservation, graphemes, four independently checked rotation mappings, fixed IMG1 metadata, portrait wrapping, mixed decorations/size/colour, and font load failures. No mocked test proves radio/iPhone/panel behavior.
+Build the native receivers from the local `epaper_ble_fast` directory (Windows Git Bash):
+
+```sh
+uv run --with ziglang python -m ziglang c++ -std=c++11 -I . tests/protocol_test.cpp -o tests/protocol_test.exe
+uv run --with ziglang python -m ziglang c++ -std=c++11 tests/cross_test.cpp -o tests/cross_test.exe
+./tests/protocol_test.exe
+```
+
+From the sender repository:
+
+```sh
+TICKEY_CROSS_EXE='C:/Users/fariz/AppData/Local/hermes/research/tickey/epaper_ble_fast/tests/cross_test.exe' node --test app.test.cjs text.test.cjs rich_text.test.cjs fast_ble.test.cjs
+```
+
+Current verification: **48 Node tests pass, none skipped; 47 native C++ checks pass.** The integration test runs real JS sender output through the actual C++ receiver and compares every one of 9472 bytes in legacy and fast modes (731 and 58 total writes respectively, including protocol overhead/probe). The test fails rather than silently skipping if its receiver executable is absent. Tests cover accepted/refused/stale probes, capability failures, operation timeout/disconnect, no replay, CRC/ID/sequence/busy errors, selected style/edit preservation, graphemes, rotation mappings, portrait wrapping and font failures. No mocked test proves radio/iPhone/panel behavior.
 
 Real Chromium regression: serve locally (`python -m http.server 8765 --bind 127.0.0.1`), open the page, then run `await (0,eval)(await (await fetch('browser-tests.js')).text())` in the browser console. Ten checks passed at a verified 390×844 viewport, including actual bundled TTF loading, exact pixel-to-payload comparison, all four orientations, selected styling across toolbar focus, plain paste, stale/rejected font loads, nine colour combinations, overflow, and real PNG decode after portrait text. Test fixtures do not communicate with hardware. `tools/download-fonts.cjs` is an optional build-time vendoring utility; downloaded binaries/licenses are already included and no build is required.
 

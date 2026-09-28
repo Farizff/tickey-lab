@@ -12,6 +12,7 @@ const BLEImages=(()=>{
   function compatible(s){return s==='IMG1:READY'||/^(RECV|VERIFIED|REFRESH|DONE|ABORT|ERR):[0-9a-f]{8}(?::[A-Z0-9]+)?$/.test(s);}
   async function send(io,bytes,palette,id,progress=()=>{},env={}) {
     const now=env.now||(()=>performance.now()),sleep=env.sleep||(ms=>new Promise(r=>setTimeout(r,ms)));
+    bytes=bytes.slice(); // Own immutable bytes across asynchronous GATT operations.
     const start=now(),tag=hex(id),header=begin(id,bytes,palette);
     const initial=await io.read();
     if(!compatible(initial))throw Error('Photo firmware required. Upload epaper_ble_images, then reconnect.');
@@ -21,12 +22,30 @@ const BLEImages=(()=>{
       do {const s=await io.read();if(s.startsWith(`ERR:${tag}:`))throw Error(s);if(accept(s))return s;await sleep(50);}while(now()<deadline);
       throw Error('Device acknowledgement timed out; disconnect and retry.');
     }
+    let frameSize=20;
+    if(io.capability==='FAST1:180') {
+      const probe=frame(5,id,180);
+      for(let i=5;i<probe.length;i++)probe[i]=i^probe[1+(i%4)];
+      // No image has begun. Only the nonmutating probe may fail into fallback.
+      // An operation timeout can leave GATT pending: abort instead of overlapping.
+      try {
+        await io.write(probe);
+        await wait(s=>s===`PROBE:${tag}:180`,1500);
+        frameSize=180;
+      } catch(error) {
+        const safe=error.name==='InvalidModificationError'||error.name==='NotSupportedError'||error.message===`ERR:${tag}:PROBE`||error.message==='Device acknowledgement timed out; disconnect and retry.';
+        if(!safe)throw error;
+      }
+    }
+    const mode=frameSize===180?'fast':'legacy';
+    progress({stage:'negotiated',mode,frameSize,bytes:0,total:SIZE});
     await io.write(header); await wait(s=>s===`RECV:${tag}:0`,5000);
+    let sinceAck=0;
     for(let offset=0;offset<SIZE;){
-      const count=Math.min(13,SIZE-offset),a=frame(2,id,7+count);
+      const count=Math.min(frameSize-7,SIZE-offset),a=frame(2,id,7+count);
       new DataView(a.buffer).setUint16(5,offset,true);a.set(bytes.subarray(offset,offset+count),7);
-      await io.write(a);offset+=count;
-      if(offset%208===0||offset===SIZE) {await wait(s=>s===`RECV:${tag}:${offset}`,5000);progress({stage:'sending',bytes:offset,total:SIZE});}
+      await io.write(a);offset+=count;sinceAck++;
+      if(sinceAck===16||offset===SIZE) {await wait(s=>s===`RECV:${tag}:${offset}`,5000);sinceAck=0;progress({stage:'sending',bytes:offset,total:SIZE});}
     }
     await io.write(frame(3,id));
     const accepted=await wait(s=>s===`VERIFIED:${tag}`||s===`REFRESH:${tag}`||s.startsWith(`DONE:${tag}:`),5000);
@@ -34,7 +53,7 @@ const BLEImages=(()=>{
     const done=accepted.startsWith('DONE:')?accepted:await wait(s=>s.startsWith(`DONE:${tag}:`),45000);
     const panelMs=Number(done.split(':')[2]);
     if(!Number.isFinite(panelMs))throw Error('Invalid panel timing');
-    return {transferMs,panelMs,id};
+    return {transferMs,panelMs,id,mode,frameSize};
   }
   return {SIZE,crc32,frame,begin,compatible,send};
 })();

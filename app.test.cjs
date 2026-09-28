@@ -26,3 +26,18 @@ test('unsupported browser has usable guidance and cannot connect',()=>{const s=u
 test('connect and disconnect work, no photo means no send',async()=>{const s=ui();await s.nodes.connect.click();assert.equal(s.nodes.read.disabled,false);assert.equal(s.nodes.send.disabled,true);s.nodes.disconnect.click();assert.equal(s.nodes.read.disabled,true);});
 test('old firmware connect displays error and disconnects',async()=>{const s=ui({status:'FINISHED'});await s.nodes.connect.click();assert.equal(s.device.gatt.connected,false);assert.match(s.nodes.status.textContent,/new epaper_ble_images/);});
 test('new selection invalidates previously prepared payload immediately',async()=>{const s=ui();vm.runInContext('prepared={bytes:new Uint8Array(9472),palette:2}',s.ctx);await s.nodes.photo.change();assert.equal(vm.runInContext('prepared',s.ctx),null);assert.equal(s.nodes.send.disabled,true);});
+test('pending capability operation times out, disconnects, and cannot start fallback',async()=>{
+ const s=ui();let sends=0;s.ctx.crypto={getRandomValues:a=>{a[0]=1;return a;}};s.ctx.BLEImages={...BLE,send:async()=>{sends++;}};
+ await s.nodes.connect.click();s.ctx.setTimeout=fn=>setTimeout(fn,0);
+ s.device.gatt.getPrimaryService=async()=>({getCharacteristic:()=>new Promise(()=>{})});
+ vm.runInContext('prepared={bytes:new Uint8Array(9472),palette:2}',s.ctx);
+ await s.nodes.send.click();assert.equal(sends,0);assert.equal(s.device.gatt.connected,false);assert.match(s.nodes.status.textContent,/Bluetooth operation timed out/);
+});
+for(const [name,error,allowed] of [['missing capability',Object.assign(Error('missing'),{name:'NotFoundError'}),true],['capability timeout',Error('Bluetooth operation timed out'),false],['capability network failure',Object.assign(Error('link failed'),{name:'NetworkError'}),false]])test(name+' respects safe fallback and never replays on reconnect',async()=>{
+ const s=ui();let sends=0;s.ctx.crypto={getRandomValues:a=>{a[0]=1;return a;}};
+ s.ctx.BLEImages={...BLE,send:async io=>{sends++;assert.equal(io.capability,'');return{mode:'legacy',transferMs:1,panelMs:2};}};
+ s.device.gatt.getPrimaryService=async()=>({getCharacteristic:async()=>{throw error;}});
+ await s.nodes.connect.click();vm.runInContext('prepared={bytes:new Uint8Array(9472),palette:2}',s.ctx);
+ await s.nodes.send.click();assert.equal(sends,allowed?1:0);
+ if(!allowed){assert.equal(s.device.gatt.connected,false);assert.match(s.nodes.status.textContent,/Error:/);await s.nodes.connect.click();assert.equal(sends,0);}
+});

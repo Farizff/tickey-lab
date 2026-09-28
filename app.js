@@ -39,13 +39,21 @@ el('send').addEventListener('click',()=>run(async()=>{
   let id;do{id=crypto.getRandomValues(new Uint32Array(1))[0];}while(!id);
   const currentDevice=device,currentRX=rx,currentTX=tx;
   function check(){if(device!==currentDevice||!currentDevice.gatt.connected)throw Error('Bluetooth disconnected');}
-  const io={read:async()=>{check();return new TextDecoder().decode(await bounded(currentTX.readValue()));},write:async a=>{check();await bounded(typeof currentRX.writeValueWithResponse==='function'?currentRX.writeValueWithResponse(a):currentRX.writeValue(a));}};
+  // Optional capability: old firmware has no such characteristic and stays IMG1.
+  let capability='';
+  try {
+    const service=await bounded(currentDevice.gatt.getPrimaryService(SERVICE));
+    const cap=await bounded(service.getCharacteristic('6e400004-b5a3-f393-e0a9-e50e24dcca9e'));
+    capability=new TextDecoder().decode(await bounded(cap.readValue()));
+  } catch(error) { check(); if(error.name!=='NotFoundError')throw error; }
+  const io={capability,read:async()=>{check();return new TextDecoder().decode(await bounded(currentTX.readValue()));},write:async a=>{check();await bounded(typeof currentRX.writeValueWithResponse==='function'?currentRX.writeValueWithResponse(a):currentRX.writeValue(a));}};
   el('progress').value=0;report('Starting image transfer…');
   const result=await BLEImages.send(io,bytes,palette,id,p=>{
     el('progress').value=p.bytes;
+    if(p.stage==='negotiated'){report(p.mode==='fast'?'Fast transfer confirmed (180-byte writes).':'Compatible transfer (20-byte writes).');return;}
     report(p.stage==='sending'?`Sending: ${p.bytes} / ${p.total} bytes`:`Image verified. Transfer ${(p.transferMs/1000).toFixed(1)} s. Waiting for panel…`);
   });
-  report(`FINISHED. Transfer ${(result.transferMs/1000).toFixed(1)} s; panel refresh ${(result.panelMs/1000).toFixed(1)} s. You can send more text or another photo without reflashing.`);
+  report(`FINISHED (${result.mode==='fast'?'fast':'compatible'}). Transfer ${(result.transferMs/1000).toFixed(1)} s; panel refresh ${(result.panelMs/1000).toFixed(1)} s. You can send more text or another photo without reflashing.`);
 }));
 function photoError(message){++textRevision;prepared=null;el('message').textContent=message;update();}
 function renderPhoto(){
