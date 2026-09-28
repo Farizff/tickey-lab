@@ -86,6 +86,32 @@
   const original=RichText.loadFonts;let release;RichText.loadFonts=()=>new Promise(r=>{release=r;});const pending=renderText();RichText.loadFonts=original;mode('qr');const bytes=Array.from(prepared.bytes).join();release();await pending;assert(Array.from(prepared.bytes).join()===bytes,'QR payload wins');
   let done;const busy=run(()=>new Promise(r=>{done=r;}));assert(el('editor').disabled&&el('send').disabled,'all modes locked during transfer');done();await busy;assert(!el('editor').disabled,'editor unlocked');exact();
  });
+ await check('IndexedDB save/list/read preserves full editable mixed state and photo original',async()=>{
+  mode('text');type('Saved mixed');select(6,11);change('textColor','red');change('textFont','Abel');change('textAutoFit',true);change('photoOrientation',90);change('cropX',75);change('zoom',1.5);await renderText();
+  const expected=DesignUI.snapshot(),id=await DesignUI.save('<img src=x onerror=alert(1)>');const row=await Designs.store('get',id);
+  assert(JSON.stringify(row.state)===JSON.stringify(expected.state),'all controls and style ranges persisted');assert(row.photo instanceof Blob&&row.photo.size===sourceBlob.size,'original image blob persists');
+  assert(el('savedDesigns').selectedOptions[0].textContent.includes('<img'),'name rendered as literal text');assert(!el('savedDesigns').querySelector('img'),'no HTML injection');
+  type('changed');await DesignUI.action(()=>DesignUI.restore(row));await renderText();assert(JSON.stringify(DesignUI.snapshot().state)===JSON.stringify(expected.state),'full restore not flat raster');exact();
+  row.name='Renamed';await Designs.store('put',row);await DesignUI.list(id);assert(el('savedDesigns').selectedOptions[0].textContent==='Renamed','rename persists');await Designs.store('delete',id);assert(!await Designs.store('get',id),'delete verified');
+ });
+ await check('backup round trip decodes original image before applying; corrupt imports leave editor unchanged',async()=>{
+  const original=DesignUI.snapshot(),json=await Designs.exportBackup(original,'Backup'),value=await Designs.importBackup(new Blob([json]));assert(value.image.naturalWidth===296,'actual original image decoded');
+  assert(JSON.stringify(value.state)===JSON.stringify(original.state),'settings and mixed styles survive backup');assert(Array.from(new Uint8Array(await value.photo.arrayBuffer())).join()===Array.from(new Uint8Array(await original.photo.arrayBuffer())).join(),'photo bytes exact');
+  const bad=JSON.parse(json);bad.photo.data=btoa('not a real image');const before=JSON.stringify(DesignUI.snapshot().state);let rejected=false;try{await Designs.importBackup(new Blob([JSON.stringify(bad)]));}catch{rejected=true;}assert(rejected,'bad photo rejected');assert(JSON.stringify(DesignUI.snapshot().state)===before,'invalid import never changes editor');
+  await DesignUI.action(async()=>{await DesignUI.restore(value);DesignUI.history.push(DesignUI.snapshot());});await renderText();exact();
+ });
+ await check('undo redo restores mixed styles, settings and modes without BLE sends',async()=>{
+  const old=DesignUI.snapshot();change('textBackground','black');const changed=DesignUI.snapshot();await DesignUI.action(()=>DesignUI.travel(-1));assert(JSON.stringify(DesignUI.snapshot().state)===JSON.stringify(old.state),'undo settings');await DesignUI.action(()=>DesignUI.travel(1));assert(JSON.stringify(DesignUI.snapshot().state)===JSON.stringify(changed.state),'redo settings');
+  mode('qr');await DesignUI.action(()=>DesignUI.travel(-1));assert(el('mode').value==='text','undo mode');assert(JSON.stringify(Designs.pack(textDocument))===JSON.stringify(old.state.document),'mixed styles survive history');await DesignUI.action(()=>DesignUI.travel(1));assert(el('mode').value==='qr','redo mode');exact();
+  let release;const busy=run(()=>new Promise(r=>{release=r;}));const snapshot=JSON.stringify(DesignUI.snapshot().state);await DesignUI.action(()=>DesignUI.travel(-1));assert(el('library').disabled&&JSON.stringify(DesignUI.snapshot().state)===snapshot,'BLE busy prevents library mutation');release();await busy;
+ });
+ await check('storage failure is visible and never deletes editor; local action blocks BLE',async()=>{
+  const original=Designs.store,before=JSON.stringify(DesignUI.snapshot().state);Designs.store=async()=>{throw Error('QuotaExceededError test');};try{await DesignUI.action(()=>DesignUI.save('Fail'));assert(/QuotaExceededError/.test(el('designStatus').textContent),'quota error visible');assert(JSON.stringify(DesignUI.snapshot().state)===before,'editor remains');}finally{Designs.store=original;}
+  let release,called=false;const pending=DesignUI.action(()=>new Promise(r=>{release=r;}));await run(()=>{called=true;});assert(!called&&el('editor').disabled&&el('send').disabled,'local task prevents transfer');release();await pending;
+ });
+ await check('load invalidates a pending old font render',async()=>{
+  mode('text');const original=RichText.loadFonts;let release;RichText.loadFonts=()=>new Promise(r=>{release=r;});const pending=renderText();RichText.loadFonts=original;const value=DesignUI.snapshot();value.state.controls.mode='qr';await DesignUI.action(()=>DesignUI.restore(value));const bytes=Array.from(prepared.bytes).join();release();await pending;assert(Array.from(prepared.bytes).join()===bytes,'old font completion cannot overwrite restored QR');exact();
+ });
  await check('mobile-width layout has no horizontal overflow',async()=>{assert(document.documentElement.scrollWidth<=innerWidth,'mobile horizontal overflow');});
  window.browserTestResults={passed:results.length,tests:results};return window.browserTestResults;
 })()

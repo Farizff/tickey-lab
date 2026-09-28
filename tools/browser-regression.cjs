@@ -17,6 +17,13 @@ let browser,ws;
  for(let i=0;i<100;i++){const r=await cdp('Runtime.evaluate',{expression:"document.readyState==='complete'&&typeof RichText!=='undefined'"},sessionId);if(r.result.value)break;await new Promise(r=>setTimeout(r,50));}
  const result=await cdp('Runtime.evaluate',{expression:"(async()=>await (0,eval)(await (await fetch('browser-tests.js')).text()))()",awaitPromise:true,returnByValue:true},sessionId);
  if(result.exceptionDetails)throw Error(result.exceptionDetails.exception?.description||JSON.stringify(result.exceptionDetails));
+ const persisted=await cdp('Runtime.evaluate',{expression:"(async()=>{const id=await DesignUI.save('Reload persistence test');return {id,state:JSON.stringify(DesignUI.snapshot().state),size:sourceBlob?.size};})()",awaitPromise:true,returnByValue:true},sessionId);
+ if(persisted.exceptionDetails)throw Error(persisted.exceptionDetails.exception?.description);
+ await cdp('Page.reload',{},sessionId);
+ for(let i=0;i<100;i++){const r=await cdp('Runtime.evaluate',{expression:"document.readyState==='complete'&&typeof DesignUI!=='undefined'&&el('savedDesigns').options.length>0"},sessionId);if(r.result.value)break;await new Promise(r=>setTimeout(r,50));}
+ const verify=await cdp('Runtime.evaluate',{expression:`(async()=>{const expected=${JSON.stringify(persisted.result.value)},row=await Designs.store('get',expected.id);if(!row||JSON.stringify(row.state)!==expected.state||row.photo?.size!==expected.size)throw Error('Reload lost editable data');await DesignUI.action(()=>DesignUI.restore(row));if(JSON.stringify(DesignUI.snapshot().state)!==expected.state||!sourceImage)throw Error('Reloaded record cannot restore');await Designs.store('delete',expected.id);if(await Designs.store('get',expected.id))throw Error('Cleanup failed');return true;})()`,awaitPromise:true,returnByValue:true},sessionId);
+ if(verify.exceptionDetails)throw Error(verify.exceptionDetails.exception?.description);
+ result.result.value.tests.push('IndexedDB survives actual page reload and restores editable original image');result.result.value.passed++;
  console.log(JSON.stringify(result.result.value,null,2));
  await cdp('Browser.close');
 })().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>{if(ws)ws.close();if(browser)browser.kill();server.close();setTimeout(()=>{try{fs.rmSync(profile,{recursive:true,force:true});}catch{}},500).unref();});

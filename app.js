@@ -1,16 +1,17 @@
 'use strict';
 const SERVICE='6e400001-b5a3-f393-e0a9-e50e24dcca9e',RX='6e400002-b5a3-f393-e0a9-e50e24dcca9e',TX='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 const el=id=>document.getElementById(id);
-let device=null,rx=null,tx=null,working=false,sourceImage=null,prepared=null,epoch=0;
+let device=null,rx=null,tx=null,working=false,localBusy=false,sourceImage=null,sourceBlob=null,photoLoading=false,prepared=null,epoch=0;
 const supported=!!(window.isSecureContext&&navigator.bluetooth);
 function report(message){el('status').textContent=message;el('log').textContent=(message+'\n'+el('log').textContent).slice(0,6000);}
 function update(){
   const ready=!!(device&&device.gatt.connected&&rx&&tx);
   el('connect').disabled=!supported||working||ready;
   el('read').disabled=working||!ready;
-  el('send').disabled=working||!ready||!prepared;
+  el('send').disabled=working||localBusy||!ready||!prepared;
   el('disconnect').disabled=!(device&&device.gatt.connected);
-  el('editor').disabled=working;
+  el('editor').disabled=working||localBusy;
+  if(el('library'))el('library').disabled=working||localBusy||photoLoading;
 }
 function clearConnection(){rx=tx=null;if(!el('status').textContent.startsWith('Error:'))report('Disconnected. A partial transfer is discarded; an already-started refresh continues.');update();}
 async function bounded(promise){
@@ -18,7 +19,7 @@ async function bounded(promise){
   try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Bluetooth operation timed out')),8000);})]);}
   finally{clearTimeout(timer);}
 }
-async function run(action){if(working)return;working=true;update();try{await action();}catch(error){
+async function run(action){if(working||localBusy)return;working=true;update();try{await action();}catch(error){
   if(device&&device.gatt.connected)device.gatt.disconnect();
   rx=tx=null;report('Error: '+error.message+' Reconnect before retrying.');
 }finally{working=false;update();}}
@@ -77,18 +78,18 @@ function renderPhoto(){
   update();
 }
 el('photo').addEventListener('change',async()=>{
-  const revision=++epoch;sourceImage=null;prepared=null;update();
+  const revision=++epoch;sourceImage=null;sourceBlob=null;prepared=null;photoLoading=true;update();
   for(const id of ['cropCanvas','preview'])el(id).getContext('2d').clearRect(0,0,el(id).width,el(id).height);
-  const file=el('photo').files[0];if(!file){photoError('Choose a JPEG or PNG.');return;}
+  const file=el('photo').files[0];if(!file){photoLoading=false;photoError('Choose a JPEG or PNG.');document.dispatchEvent(new Event('designphoto'));return;}
   el('message').textContent='Preparing on your phone…';let url;
   try{
-    PhotoCodec.checkFile(file.size,new Uint8Array(await file.slice(0,8).arrayBuffer()));
+    const header=new Uint8Array(await file.slice(0,8).arrayBuffer());PhotoCodec.checkFile(file.size,header);
     const image=new Image();url=URL.createObjectURL(file);image.src=url;await image.decode();
     if(revision!==epoch||el('mode').value!=='photo')return;
     if(image.naturalWidth<=0||image.naturalHeight<=0||image.naturalWidth*image.naturalHeight>20000000)throw Error('Use an image up to 20 megapixels');
-    sourceImage=image;el('cropX').value='50';el('cropY').value='50';el('zoom').value='1';renderPhoto();
+    sourceImage=image;sourceBlob=new Blob([file],{type:header[0]===137?'image/png':'image/jpeg'});el('cropX').value='50';el('cropY').value='50';el('zoom').value='1';renderPhoto();
   }catch(error){if(revision===epoch)photoError('Cannot prepare photo: '+error.message);}
-  finally{if(url)URL.revokeObjectURL(url);}
+  finally{if(url)URL.revokeObjectURL(url);if(revision===epoch){photoLoading=false;update();document.dispatchEvent(new Event('designphoto'));}}
 });
 let textDocument=RichText.create(),selection={start:0,end:0},textRevision=0;
 const styleControls={textSize:'size',textFont:'family',textColor:'color',textBold:'bold',textItalic:'italic',textUnderline:'underline',textStrike:'strike'};
@@ -136,7 +137,7 @@ function renderQR(){
   update();
 }
 el('mode').addEventListener('change',()=>{
-  ++epoch;prepared=null;
+  ++epoch;photoLoading=false;prepared=null;
   const mode=el('mode').value;
   for(const name of ['text','photo','qr'])el(name+'Controls').hidden=name!==mode;
   el(mode+'PreviewSlot').appendChild(el('preview'));

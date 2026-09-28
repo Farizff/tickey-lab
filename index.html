@@ -11,6 +11,15 @@
 <p class="note">Disconnect nRF Connect first. If discovery expires, send <code>b</code> in Serial Monitor or reset the board while the panel is idle.</p>
 <div class="actions"><button id="connect">Connect to TICKEY-BLE</button><button id="read" class="secondary" disabled>Read device status</button><button id="disconnect" class="secondary" disabled>Disconnect / stop transfer</button></div>
 <p id="status" role="status" aria-live="polite">Not connected.</p>
+<fieldset id="library"><legend>Local designs &amp; editor history</legend>
+<p class="note">Saved only in this browser on this phone—not in the display or cloud. Bluefy and Safari have separate storage. Browser cleanup/private mode can erase designs; export backups to Files. Loading, importing and undo never send over Bluetooth. Undo affects only the editor (up to 40 steps), not the physical screen.</p>
+<div class="actions"><button id="undo" class="secondary" disabled>Undo edit</button><button id="redo" class="secondary" disabled>Redo edit</button></div>
+<label>Design name <input id="designName" maxlength="80" placeholder="My design"></label>
+<button id="saveDesign">Save new design</button>
+<label>Saved designs <select id="savedDesigns" style="width:100%"></select></label>
+<div class="actions"><button id="loadDesign" class="secondary">Load selected</button><button id="renameDesign" class="secondary">Rename selected to name above</button><button id="deleteDesign" class="secondary">Delete selected…</button><button id="refreshDesigns" class="secondary">Refresh list</button><button id="exportDesign" class="secondary">Export current editor backup</button></div>
+<label>Import backup into editor (JSON, up to 15 MiB) <input id="importDesign" type="file" accept="application/json,.json"></label>
+<p id="designStatus" role="status" aria-live="polite">Unsaved edits are not recovered after closing this tab. Save or export before leaving.</p></fieldset>
 <fieldset id="editor"><label>Content <select id="mode"><option value="photo">Photo</option><option value="text">Text</option><option value="qr">QR</option></select></label>
 <div id="textControls" hidden>
 <label>Text<textarea id="text" rows="4" maxlength="2000" placeholder="Type here. Preview wraps live below." style="width:100%;font:inherit"></textarea></label><div id="textPreviewSlot"></div>
@@ -38,4 +47,4 @@
 <p class="note">A transfer changes the current picture only after validation. Disconnecting before commit discards the partial image. Once panel refresh starts, disconnecting cannot undo it. A progress bar reaching 100% does not mean the panel is finished.</p>
 <details><summary>Test log</summary><pre id="log"></pre></details>
 <footer class="note">No analytics or photo uploads. Processing stays on your phone; bytes travel directly to the ESP32. GitHub serves only this page. Lab BLE has no authenticated pairing. Independent learning prototype, not an official TICKEY app.</footer>
-</main><script src="photo_codec.js?v=orient2"></script><script src="ble_images.js?v=fast1"></script><script src="rich_text.js?v=fit2"></script><script src="vendor/qrcode.js?v=1.4.4"></script><script src="qr_codec.js?v=qr1"></script><script src="app.js?v=features2"></script></body></html>
+</main><script src="photo_codec.js?v=orient2"></script><script src="ble_images.js?v=fast1"></script><script src="rich_text.js?v=fit2"></script><script src="vendor/qrcode.js?v=1.4.4"></script><script src="qr_codec.js?v=qr1"></script><script src="designs.js?v=designs1"></script><script src="app.js?v=designs1"></script><script src="design_ui.js?v=designs1"></script></body></html>
