@@ -4,15 +4,15 @@ const PhotoCodec = (() => {
   const palette = [[255,255,255],[0,0,0],[255,0,0]];
   function crop(w,h,x,y,zoom,width=W,height=H) {
     if (![w,h,x,y,zoom].every(Number.isFinite) || w<=0 || h<=0 || x<0 || x>100 || y<0 || y>100 || zoom<1 || zoom>3) throw Error('Invalid crop');
-    if(!((width===W&&height===H)||(width===H&&height===W)))throw Error('Invalid crop dimensions');
+    if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width>W||height>W||width*height>W*H)throw Error('Invalid crop dimensions');
     const scale = Math.min(w/width,h/height)/zoom;
     const sw=width*scale, sh=height*scale;
     return [(w-sw)*x/100,(h-sh)*y/100,sw,sh];
   }
   function quantize(rgba, useRed, width=W, height=H) {
-    if(!((width===W&&height===H)||(width===H&&height===W)))throw Error('Invalid pixel dimensions');
-    if (rgba.length!==W*H*4) throw Error('Invalid pixel dimensions');
-    const rgb=new Float32Array(W*H*3), codes=new Uint8Array(W*H);
+    if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width>W||height>W||width*height>W*H)throw Error('Invalid pixel dimensions');
+    if (rgba.length!==width*height*4) throw Error('Invalid pixel dimensions');
+    const rgb=new Float32Array(width*height*3), codes=new Uint8Array(width*height);
     for(let i=0;i<codes.length;i++) {
       const a=rgba[i*4+3]/255;
       for(let c=0;c<3;c++) rgb[i*3+c]=rgba[i*4+c]*a+255*(1-a);

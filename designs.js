@@ -1,7 +1,7 @@
 // Bounded, versioned editable documents. No HTML or executable content.
 const Designs=(()=>{
   const MAX_IMAGE=10*1024*1024,MAX_BACKUP=15*1024*1024;
-  const choices={mode:['photo','text','qr'],textSize:['8','10','12','14','16','18','20','22','24','26','28','30','32','36','40','44','48'],textFont:['sans-serif','serif','monospace','Abel','Lobster','Pacifico'],textColor:['black','white','red'],textBackground:['white','black','red'],textAlign:['left','center','right'],textOrientation:['0','90','180','270'],photoOrientation:['0','90','180','270'],palette:['bw','red']};
+  const choices={mode:['photo','text','qr','combined'],combinedTemplate:['text-qr','photo-text','photo-text-qr'],combinedOrientation:['0','90','180','270'],textSize:['8','10','12','14','16','18','20','22','24','26','28','30','32','36','40','44','48'],textFont:['sans-serif','serif','monospace','Abel','Lobster','Pacifico'],textColor:['black','white','red'],textBackground:['white','black','red'],textAlign:['left','center','right'],textOrientation:['0','90','180','270'],photoOrientation:['0','90','180','270'],palette:['bw','red']};
   const flags=['textBold','textItalic','textUnderline','textStrike','textAutoFit'];
   function fail(){throw Error('Invalid or unsupported TICKEY design.');}
   function text(s,max){if(typeof s!=='string'||s.length>max||/[\x00-\x08\x0b-\x1f\x7f]/.test(s))fail();return s;}
@@ -12,7 +12,7 @@ const Designs=(()=>{
   }
   function validate(v){
     if(!v||v.version!==1||!v.controls||!v.document)fail();
-    const controls={};for(const [k,a] of Object.entries(choices)){if(!a.includes(v.controls[k]))fail();controls[k]=v.controls[k];}
+    const controls={};for(const [k,a] of Object.entries(choices)){const value=v.controls[k]===undefined&&k.startsWith('combined')?a[0]:v.controls[k];if(!a.includes(value))fail();controls[k]=value;}
     for(const k of flags){if(typeof v.controls[k]!=='boolean')fail();controls[k]=v.controls[k];}
     for(const [k,min,max] of [['cropX',0,100],['cropY',0,100],['zoom',1,3]]){const n=v.controls[k];if(typeof n!=='string'||!n.trim()||!Number.isFinite(Number(n))||Number(n)<min||Number(n)>max)fail();controls[k]=n;}
     controls.qrText=text(v.controls.qrText,2000);

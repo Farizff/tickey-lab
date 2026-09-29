@@ -8,7 +8,7 @@
  const select=(a,b)=>{el('text').focus();el('text').setSelectionRange(a,b);el('text').dispatchEvent(new Event('select'));};
  async function check(name,fn){await fn();results.push(name);}
  function exact(){
-  assert(prepared&&prepared.bytes.length===9472,'fixed wire bytes ready');
+  assert(prepared&&prepared.bytes.length===9472,'fixed wire bytes ready: '+el('message').textContent);
   const bytes=prepared.bytes,wire=new Uint8Array(296*128);for(let i=0;i<wire.length;i++)wire[i]=(bytes[i>>2]>>(6-2*(i%4)))&3;
   const angle=el('mode').value==='qr'?0:Number(el(el('mode').value+'Orientation').value);
   const logical=RichText.fromWire(wire,angle),expected=PhotoCodec.preview(logical),canvas=el('preview'),actual=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
@@ -111,6 +111,39 @@
  });
  await check('load invalidates a pending old font render',async()=>{
   mode('text');const original=RichText.loadFonts;let release;RichText.loadFonts=()=>new Promise(r=>{release=r;});const pending=renderText();RichText.loadFonts=original;const value=DesignUI.snapshot();value.state.controls.mode='qr';await DesignUI.action(()=>DesignUI.restore(value));const bytes=Array.from(prepared.bytes).join();release();await pending;assert(Array.from(prepared.bytes).join()===bytes,'old font completion cannot overwrite restored QR');exact();
+ });
+ await check('combined templates all orientations: exact packed pixels, mixed ink and independent QR decode',async()=>{
+  mode('text');select(0,0);change('textBackground','white');change('textColor','black');change('textSize',16);change('textAutoFit',true);type('Hi red');select(3,6);change('textColor','red');change('textBold',true);change('qrText','https://example.com');mode('combined');
+  const original=JSON.stringify(textDocument);
+  for(const template of ['text-qr','photo-text','photo-text-qr'])for(const angle of [0,90,180,270]){
+   change('combinedTemplate',template);change('combinedOrientation',angle);await renderCombined();const wire=exact();assert(wire.includes(1)&&wire.includes(2),'mixed ink survives composite');
+   const plan=Combined.regions(template,angle),c=el('preview'),rgba=c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+   if(plan.qr){assert(jsQR(rgba,c.width,c.height)?.data==='https://example.com','independent decode of combined packed raster');const q=QRCodec.render(el('qrText').value),logical=RichText.fromWire(wire,angle);for(let y=0;y<128;y++)for(let x=0;x<128;x++)assert(logical[(plan.qr.y+y)*c.width+plan.qr.x+x]===q.codes[y*296+84+x],'QR including quiet border is untouched');}
+   assert(JSON.stringify(textDocument)===original,'original mixed styles unchanged');
+  }
+ });
+ await check('combined overflow, density, font failures and stale mode completion cannot send',async()=>{
+  type('x\n'.repeat(60));await renderCombined();assert(prepared===null&&/does not fit/.test(el('message').textContent),'region overflow blocks');type('Hi');change('qrText','a'.repeat(300));await renderCombined();assert(prepared===null&&/dense/.test(el('message').textContent),'density blocks');change('qrText','https://example.com');await renderCombined();exact();
+  const load=RichText.loadFonts;RichText.loadFonts=async()=>{throw Error('Font test failure');};await renderCombined();assert(prepared===null,'failed fonts block');let release;RichText.loadFonts=()=>new Promise(r=>{release=r;});const pending=renderCombined();RichText.loadFonts=load;mode('qr');const bytes=Array.from(prepared.bytes).join();release();await pending;assert(Array.from(prepared.bytes).join()===bytes,'mode epoch discards combined result');
+  mode('combined');await renderCombined();let releaseOld;RichText.loadFonts=()=>new Promise(r=>{releaseOld=r;});const old=renderCombined();RichText.loadFonts=load;change('combinedTemplate','text-qr');await renderCombined();const next=Array.from(prepared.bytes).join();releaseOld();await old;assert(Array.from(prepared.bytes).join()===next,'new template wins');exact();
+ });
+ await check('combined saved designs, backups and template undo redo retain editable sources',async()=>{
+  change('combinedTemplate','photo-text-qr');await renderCombined();const expected=DesignUI.snapshot(),id=await DesignUI.save('Combined');const row=await Designs.store('get',id);assert(JSON.stringify(row.state)===JSON.stringify(expected.state),'combined save readback');
+  const imported=await Designs.importBackup(new Blob([await Designs.exportBackup(expected,'Combined')]));mode('photo');await DesignUI.action(()=>DesignUI.restore(imported));await renderCombined();assert(JSON.stringify(DesignUI.snapshot().state)===JSON.stringify(expected.state),'combined backup restore');exact();
+  // Seed history after direct restore, just as the import button does.
+  DesignUI.history.push(DesignUI.snapshot());change('combinedTemplate','text-qr');await DesignUI.action(()=>DesignUI.travel(-1));assert(el('combinedTemplate').value==='photo-text-qr','undo template');await DesignUI.action(()=>DesignUI.travel(1));assert(el('combinedTemplate').value==='text-qr','redo template');await renderCombined();exact();
+  const legacy=DesignUI.snapshot();delete legacy.state.controls.combinedTemplate;delete legacy.state.controls.combinedOrientation;legacy.state.controls.mode='text';await DesignUI.action(()=>DesignUI.restore(legacy));await renderText();assert(el('combinedTemplate').value==='text-qr'&&el('combinedOrientation').value==='0','old record defaults');exact();await Designs.store('delete',id);
+  mode('combined');change('combinedTemplate','photo-text-qr');await renderCombined();exact();
+ });
+ await check('combined photo decode invalidates payload, stale completion cannot overwrite mode, busy lock remains shared',async()=>{
+  const snapshot=DesignUI.snapshot(),decode=Image.prototype.decode;let release;
+  Image.prototype.decode=function(){return new Promise(r=>{release=r;});};
+  const file=new File([sourceBlob],'fixture.png',{type:'image/png'}),transfer=new DataTransfer();transfer.items.add(file);el('photo').files=transfer.files;el('photo').dispatchEvent(new Event('change'));
+  for(let i=0;i<100&&!release;i++)await new Promise(r=>setTimeout(r,5));
+  assert(release&&prepared===null&&photoLoading,'photo decode immediately invalidates composite');Image.prototype.decode=decode;
+  mode('qr');const bytes=Array.from(prepared.bytes).join();release();await pause();assert(Array.from(prepared.bytes).join()===bytes&&sourceImage===null,'stale image ignored after mode switch');
+  await DesignUI.action(()=>DesignUI.restore(snapshot));await renderCombined();exact();
+  let done;const busy=run(()=>new Promise(r=>{done=r;}));assert(el('editor').disabled&&el('library').disabled&&el('send').disabled,'combined shares BLE busy interlock');done();await busy;exact();
  });
  await check('mobile-width layout has no horizontal overflow',async()=>{assert(document.documentElement.scrollWidth<=innerWidth,'mobile horizontal overflow');});
  window.browserTestResults={passed:results.length,tests:results};return window.browserTestResults;

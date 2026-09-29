@@ -61,7 +61,8 @@ const RichText=(()=>{
   }
   function layout(ctx,doc,options={}){
     if(doc.styles.length!==doc.text.length)throw Error('Text styles do not match text.');
-    const {width,height}=dimensions(options.orientation||0),available=width-20;
+    const {width,height}=options.region||dimensions(options.orientation||0),available=width-20;
+    if(!Number.isInteger(width)||!Number.isInteger(height)||width<24||height<24||width>296||height>296)throw Error('Invalid text region.');
     const segments=typeof Intl.Segmenter==='function'?[...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(doc.text)]:Array.from(doc.text).map((segment,i,a)=>({segment,index:a.slice(0,i).join('').length}));
     const lines=[];let line=[];
     const finish=(s=defaults)=>{line.emptySize=s.size;lines.push(line);line=[];};
@@ -126,7 +127,7 @@ const RichText=(()=>{
       codes[i]=best;
     }
     const sameColor=plan.lines.some(l=>l.items.some(g=>g.text.trim()&&g.s.color===background));
-    return {...plan,codes:toWire(codes,options.orientation||0),sameColor};
+    return {...plan,codes:options.region?codes:toWire(codes,options.orientation||0),sameColor};
   }
   return {families,defaults,style,create,apply,replace,edit,font,dimensions,toWire,fromWire,loadFonts,layout,fit,render};
 })();

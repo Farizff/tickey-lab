@@ -59,6 +59,7 @@ el('send').addEventListener('click',()=>run(async()=>{
 function photoError(message){++textRevision;prepared=null;el('message').textContent=message;update();}
 function renderPhoto(){
   prepared=null;
+  if(el('mode').value==='combined'){renderCombined();return;}
   if(el('mode').value==='text'){renderText();return;}
   if(el('mode').value==='qr'){renderQR();return;}
   const angle=Number(el('photoOrientation').value),{width,height}=RichText.dimensions(angle);
@@ -85,7 +86,7 @@ el('photo').addEventListener('change',async()=>{
   try{
     const header=new Uint8Array(await file.slice(0,8).arrayBuffer());PhotoCodec.checkFile(file.size,header);
     const image=new Image();url=URL.createObjectURL(file);image.src=url;await image.decode();
-    if(revision!==epoch||el('mode').value!=='photo')return;
+    if(revision!==epoch||!['photo','combined'].includes(el('mode').value))return;
     if(image.naturalWidth<=0||image.naturalHeight<=0||image.naturalWidth*image.naturalHeight>20000000)throw Error('Use an image up to 20 megapixels');
     sourceImage=image;sourceBlob=new Blob([file],{type:header[0]===137?'image/png':'image/jpeg'});el('cropX').value='50';el('cropY').value='50';el('zoom').value='1';renderPhoto();
   }catch(error){if(revision===epoch)photoError('Cannot prepare photo: '+error.message);}
@@ -100,6 +101,7 @@ function retainSelection(){
   el('selectionStatus').textContent=count?`${count} selected characters: formatting applies only to this selection.`:'No selection: formatting applies to the whole message and new text.';
 }
 async function renderText(){
+  if(el('mode').value==='combined')return renderCombined();
   const revision=++textRevision,modeEpoch=epoch;
   prepared=null;const preview=el('preview');preview.getContext('2d').clearRect(0,0,preview.width,preview.height);update();
   try{
@@ -126,6 +128,7 @@ async function renderText(){
   update();
 }
 function renderQR(){
+  if(el('mode').value==='combined')return renderCombined();
   ++textRevision;prepared=null;
   const preview=el('preview');preview.width=296;preview.height=128;preview.style.maxWidth='';
   try{
@@ -136,10 +139,36 @@ function renderQR(){
   }catch(error){el('message').textContent=error.message;}
   update();
 }
+function showControls(){
+  const mode=el('mode').value,combined=mode==='combined',template=el('combinedTemplate').value;
+  el('combinedControls').hidden=!combined;
+  for(const name of ['text','photo','qr'])el(name+'Controls').hidden=combined?(name!=='text'&&!template.includes(name)):name!==mode;
+  for(const id of ['textOrientation','photoOrientation'])el(id).disabled=combined;
+}
+async function renderCombined(){
+  const revision=++textRevision,modeEpoch=epoch,preview=el('preview');prepared=null;
+  preview.getContext('2d').clearRect(0,0,preview.width,preview.height);update();
+  try{
+    currentStyle();
+    const doc=textDocument,options={template:el('combinedTemplate').value,orientation:Number(el('combinedOrientation').value),background:el('textBackground').value,align:el('textAlign').value,autoFit:el('textAutoFit').checked,cropX:Number(el('cropX').value),cropY:Number(el('cropY').value),zoom:Number(el('zoom').value),red:el('palette').value==='red',qrText:el('qrText').value};
+    el('message').textContent='Loading fonts and preparing layout…';
+    await RichText.loadFonts(doc,document.fonts);
+    if(revision!==textRevision||modeEpoch!==epoch||el('mode').value!=='combined')return;
+    const result=Combined.render(el('cropCanvas').getContext('2d',{willReadFrequently:true}),doc,sourceImage,options);
+    const encoded=PhotoCodec.encode(result.codes),decoded=PhotoCodec.decode(encoded);
+    preview.width=result.width;preview.height=result.height;preview.style.maxWidth=result.width===128?'256px':'';
+    preview.getContext('2d').putImageData(new ImageData(PhotoCodec.preview(RichText.fromWire(decoded,options.orientation)),result.width,result.height),0,0);
+    prepared={bytes:Uint8Array.from(encoded.slice(22).match(/../g),b=>parseInt(b,16)),palette:decoded.includes(2)?3:2};
+    el('message').textContent='Combined preview ready. Tap Send combined when ready.';
+    if(result.text.autoFitted)el('message').textContent+=` Auto-fit reduced sizes to ${result.text.effectiveMin}–${result.text.effectiveMax}px; original sizes are preserved.`;
+    if(result.qr)el('message').textContent+=` QR: ${result.qr.scale}px modules, 4-module white border. Scan-check before use.`;
+  }catch(error){if(revision===textRevision&&modeEpoch===epoch)el('message').textContent=error.message;}
+  update();
+}
 el('mode').addEventListener('change',()=>{
   ++epoch;photoLoading=false;prepared=null;
   const mode=el('mode').value;
-  for(const name of ['text','photo','qr'])el(name+'Controls').hidden=name!==mode;
+  showControls();
   el(mode+'PreviewSlot').appendChild(el('preview'));
   el('send').textContent=`Send ${mode==='qr'?'QR':mode} over Bluetooth`;
   el('preview').getContext('2d').clearRect(0,0,296,128);
@@ -179,5 +208,6 @@ for(const [id,key] of Object.entries(styleControls))el(id).addEventListener('inp
 for(const id of ['textBackground','textAlign','textOrientation','textAutoFit'])el(id).addEventListener('input',renderText);
 for(const id of ['cropX','cropY','zoom','palette','photoOrientation'])el(id).addEventListener('input',renderPhoto);
 el('qrText').addEventListener('input',renderQR);
+for(const id of ['combinedTemplate','combinedOrientation'])el(id).addEventListener('input',()=>{showControls();renderCombined();});
 if(!supported)report('Open this HTTPS page in Bluefy and allow Bluetooth access.');
 update();
