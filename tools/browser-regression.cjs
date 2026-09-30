@@ -9,8 +9,8 @@ let browser,ws;
  browser=spawn(process.env.TICKEY_BROWSER||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',['--headless=new','--no-first-run','--no-default-browser-check','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe']});
  const url=await new Promise((resolve,reject)=>{let s='';const timer=setTimeout(()=>reject(Error('Browser startup timeout')),20000);browser.on('error',reject);browser.stderr.on('data',b=>{s+=b;const m=s.match(/DevTools listening on (ws:\/\/[^\s]+)/);if(m){clearTimeout(timer);resolve(m[1]);}});});
  ws=new WebSocket(url);await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});let next=0;const pending=new Map();
- ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);pending.delete(m.id);if(m.error)p.reject(Error(JSON.stringify(m.error)));else p.resolve(m.result);}};
- function cdp(method,params={},sessionId){return new Promise((resolve,reject)=>{const id=++next;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params,sessionId}));});}
+ ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);if(!p)return;pending.delete(m.id);if(m.error)p.reject(Error(JSON.stringify(m.error)));else p.resolve(m.result);}};
+ function cdp(method,params={},sessionId){return new Promise((resolve,reject)=>{const id=++next,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout: '+method));},20000);pending.set(id,{resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}});ws.send(JSON.stringify({id,method,params,sessionId}));});}
  const {targetId}=await cdp('Target.createTarget',{url:'about:blank'}),{sessionId}=await cdp('Target.attachToTarget',{targetId,flatten:true});
  await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true},sessionId);
  await cdp('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/`},sessionId);
@@ -24,6 +24,9 @@ let browser,ws;
  const verify=await cdp('Runtime.evaluate',{expression:`(async()=>{const expected=${JSON.stringify(persisted.result.value)},row=await Designs.store('get',expected.id);if(!row||JSON.stringify(row.state)!==expected.state||row.photo?.size!==expected.size)throw Error('Reload lost editable data');await DesignUI.action(()=>DesignUI.restore(row));if(JSON.stringify(DesignUI.snapshot().state)!==expected.state||!sourceImage)throw Error('Reloaded record cannot restore');await Designs.store('delete',expected.id);if(await Designs.store('get',expected.id))throw Error('Cleanup failed');return true;})()`,awaitPromise:true,returnByValue:true},sessionId);
  if(verify.exceptionDetails)throw Error(verify.exceptionDetails.exception?.description);
  result.result.value.tests.push('IndexedDB survives actual page reload and restores editable original image');result.result.value.passed++;
+ const galleryResult=await cdp('Runtime.evaluate',{expression:"(async()=>await (0,eval)(await (await fetch('gallery-browser-tests.js')).text()))()",awaitPromise:true,returnByValue:true},sessionId);
+ if(galleryResult.exceptionDetails)throw Error(galleryResult.exceptionDetails.exception?.description||JSON.stringify(galleryResult.exceptionDetails));
+ result.result.value.tests.push(...galleryResult.result.value.tests);result.result.value.passed+=galleryResult.result.value.passed;
  console.log(JSON.stringify(result.result.value,null,2));
  await cdp('Browser.close');
-})().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>{if(ws)ws.close();if(browser)browser.kill();server.close();setTimeout(()=>{try{fs.rmSync(profile,{recursive:true,force:true});}catch{}},500).unref();});
+})().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>{if(ws)ws.close();if(browser){browser.kill();browser.stderr?.destroy();browser.unref();}server.closeAllConnections();server.close();setTimeout(()=>{try{fs.rmSync(profile,{recursive:true,force:true});}catch{}},500).unref();});

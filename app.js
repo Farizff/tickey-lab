@@ -12,6 +12,7 @@ function update(){
   el('disconnect').disabled=!(device&&device.gatt.connected);
   el('editor').disabled=working||localBusy;
   if(el('library'))el('library').disabled=working||localBusy||photoLoading;
+  if(typeof updateGallery==='function')updateGallery();
 }
 function clearConnection(){rx=tx=null;if(!el('status').textContent.startsWith('Error:'))report('Disconnected. A partial transfer is discarded; an already-started refresh continues.');update();}
 async function bounded(promise){
@@ -35,7 +36,8 @@ el('connect').addEventListener('click',()=>run(async()=>{
 }));
 el('disconnect').addEventListener('click',()=>{if(device)device.gatt.disconnect();});
 el('read').addEventListener('click',()=>run(async()=>report('Device status: '+new TextDecoder().decode(await bounded(tx.readValue())))));
-el('send').addEventListener('click',()=>run(async()=>{
+el('send').addEventListener('click',()=>run(sendPrepared));
+async function sendPrepared(){
   const bytes=prepared.bytes.slice(),palette=prepared.palette;
   let id;do{id=crypto.getRandomValues(new Uint32Array(1))[0];}while(!id);
   const currentDevice=device,currentRX=rx,currentTX=tx;
@@ -55,7 +57,8 @@ el('send').addEventListener('click',()=>run(async()=>{
     report(p.stage==='sending'?`Sending: ${p.bytes} / ${p.total} bytes`:`Image verified. Transfer ${(p.transferMs/1000).toFixed(1)} s. Waiting for panel…`);
   });
   report(`FINISHED (${result.mode==='fast'?'fast':'compatible'}). Transfer ${(result.transferMs/1000).toFixed(1)} s; panel refresh ${(result.panelMs/1000).toFixed(1)} s. You can send more text or another photo without reflashing.`);
-}));
+  return result;
+}
 function photoError(message){++textRevision;prepared=null;el('message').textContent=message;update();}
 function renderPhoto(){
   prepared=null;
