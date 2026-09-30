@@ -12,7 +12,16 @@
  el('galleryInterval').value='180';await click('galleryStart');assert(running&&el('galleryStatus').textContent.includes('ON'),'start ACK');await click('galleryStop');assert(!running&&el('galleryStatus').textContent.includes('OFF'),'stop ACK');tests.push('gallery start and stop render correlated acknowledged state');
  window.confirm=()=>false;const count=writes.length;await click('galleryDelete');await click('gallerySave');assert(writes.length===count,'cancel prevents write');tests.push('cancelled destructive/save confirmation sends nothing');
  connect();missing=true;await click('galleryProbe');assert(device.gatt.connected&&!galleryCharacteristic&&el('galleryStatus').textContent.includes('not supported'),'legacy connection preserved');tests.push('unsupported legacy gallery leaves normal BLE connection usable');
- connect();missing=false;capability='GAL1:UNAVAILABLE';await click('galleryProbe');assert(!device.gatt.connected&&el('status').textContent.includes('provisioning'),'unavailable fails visibly');assert(!galleryCharacteristic&&el('galleryStart').disabled,'no unsafe gallery access');tests.push('unavailable filesystem reports owner provisioning and disables commands');
+ connect();missing=false;capability='GAL1:UNAVAILABLE';await click('galleryProbe');assert(device.gatt.connected&&el('status').textContent.includes('provisioning'),'unavailable fails visibly without unnecessary disconnect');assert(!galleryCharacteristic&&el('galleryStart').disabled,'no unsafe gallery access');tests.push('unavailable filesystem reports owner provisioning and disables commands');
+ for(const failure of ['native string failure',{code:17,description:'native failure'},undefined]){
+  connect();device.gatt.getPrimaryService=async()=>{throw failure;};await click('galleryProbe');
+  assert(device.gatt.connected&&!galleryCharacteristic&&el('galleryStart').disabled,'discovery failure retains link but disables gallery');assert(el('galleryStatus').textContent.includes('service discovery')&&!el('status').textContent.includes('undefined'),'stage and normalized error shown');
+ }
+ tests.push('string/object/undefined discovery rejections keep connection and identify failure stage');
+ connect();device.gatt.getPrimaryService=async()=>{throw Object.assign(Error('timed out'),{code:'GATT_TIMEOUT'});};await click('galleryProbe');assert(!device.gatt.connected&&!rx,'timeout invalidates transport');tests.push('uncertain timed-out discovery still disconnects before another GATT operation');
+ connect();missing=false;capability='GAL1:8:180';const originalWrite=command.writeValueWithResponse;
+ try{command.writeValueWithResponse=async()=>{throw 'native list write failure';};await click('galleryProbe');assert(!device.gatt.connected&&!galleryCharacteristic&&el('galleryStatus').textContent.includes('slot list command/acknowledgement')&&el('status').textContent.includes('native list write failure'),'uncertain command failure retains detail and disconnects');}finally{command.writeValueWithResponse=originalWrite;}
+ tests.push('slot-list write failure identifies command stage and invalidates uncertain session');
  return await (async()=>{
   connect();missing=false;capability='GAL1:8:180';await click('galleryProbe');
   const canvas=document.createElement('canvas');canvas.width=400;canvas.height=300;const ctx=canvas.getContext('2d');ctx.fillStyle='red';ctx.fillRect(0,0,200,300);

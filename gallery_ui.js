@@ -19,13 +19,25 @@ async function galleryCommand(op,value,slot=Number(el('gallerySlot').value)){
   report('Device gallery command completed.');
 }
 el('galleryProbe').addEventListener('click',()=>run(async()=>{
-  galleryCharacteristic=null;
-  const service=await bounded(device.gatt.getPrimaryService(SERVICE));let cap;
-  try{cap=await bounded(service.getCharacteristic(GalleryBLE.CAP));}catch(e){if(e.name!=='NotFoundError')throw e;el('galleryStatus').textContent='Gallery not supported by this firmware. Normal Send still works.';return;}
-  const slots=GalleryBLE.capability(new TextDecoder().decode(await bounded(cap.readValue())));
-  galleryCharacteristic=await bounded(service.getCharacteristic(GalleryBLE.CMD));
-  el('gallerySlot').replaceChildren(...Array.from({length:slots},(_,i)=>new Option(`Slot ${i+1}`,String(i))));
-  await galleryCommand(1);
+  galleryCharacteristic=null;galleryState=null;
+  let stage='service discovery',commandStarted=false;
+  const progress=s=>{stage=s;el('galleryStatus').textContent='Checking gallery: '+s+'…';report('Gallery check: '+s);};
+  try{
+    progress('service discovery');const service=await bounded(device.gatt.getPrimaryService(SERVICE));
+    progress('capability discovery (0005)');const cap=await bounded(service.getCharacteristic(GalleryBLE.CAP));
+    progress('capability read (0005)');const raw=new TextDecoder().decode(await bounded(cap.readValue()));report('Gallery capability: '+raw.slice(0,100));
+    progress('capability validation');const slots=GalleryBLE.capability(raw);
+    progress('command discovery (0006)');galleryCharacteristic=await bounded(service.getCharacteristic(GalleryBLE.CMD));
+    el('gallerySlot').replaceChildren(...Array.from({length:slots},(_,i)=>new Option(`Slot ${i+1}`,String(i))));
+    progress('slot list command/acknowledgement');commandStarted=true;await galleryCommand(1);
+  }catch(error){
+    galleryCharacteristic=null;galleryState=null;
+    const detail=stage==='capability discovery (0005)'&&error?.name==='NotFoundError'?'Gallery not supported by this firmware or not exposed by the browser. Normal Send still works.':errorText(error);
+    const message=`Gallery check failed at ${stage}: ${detail}`;
+    el('galleryStatus').textContent=message;report('Error: '+message);
+    if(commandStarted||error?.code==='GATT_TIMEOUT'||!device?.gatt.connected)throw Error(message);
+    el('galleryStatus').textContent+=' Connection kept; gallery controls stay disabled. See Test log. No photos were sent.';
+  }
 }));
 for(const [button,op] of [['galleryList',1],['galleryShow',3],['galleryDelete',4],['galleryStart',5],['galleryStop',6]])el(button).addEventListener('click',()=>run(async()=>{
   if(op===4&&!window.confirm('Delete the selected device slot?'))return;

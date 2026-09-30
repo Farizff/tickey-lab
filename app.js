@@ -17,12 +17,18 @@ function update(){
 function clearConnection(){rx=tx=null;if(!el('status').textContent.startsWith('Error:'))report('Disconnected. A partial transfer is discarded; an already-started refresh continues.');update();}
 async function bounded(promise){
   let timer;
-  try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Bluetooth operation timed out')),8000);})]);}
+  try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Object.assign(Error('Bluetooth operation timed out'),{code:'GATT_TIMEOUT'})),8000);})]);}
   finally{clearTimeout(timer);}
+}
+function errorText(error){
+  if(typeof error==='string'&&error.trim())return error;
+  if(error&&error.message)return `${error.name&&error.name!=='Error'?error.name+': ':''}${error.message}`;
+  try{const detail=JSON.stringify(error);if(detail&&detail!=='{}'&&detail!=='null')return detail;}catch(_){}
+  return error&&error.name?String(error.name):'Bluetooth/browser returned no error details';
 }
 async function run(action){if(working||localBusy)return;working=true;update();try{await action();}catch(error){
   if(device&&device.gatt.connected)device.gatt.disconnect();
-  rx=tx=null;report('Error: '+error.message+' Reconnect before retrying.');
+  rx=tx=null;report('Error: '+errorText(error)+' Reconnect before retrying.');
 }finally{working=false;update();}}
 el('connect').addEventListener('click',()=>run(async()=>{
   report('Choose TICKEY-BLE…');
