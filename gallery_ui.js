@@ -8,12 +8,13 @@ function updateGallery(){
   el('galleryProbe').disabled=!ready||busy;
   for(const id of ['galleryList','galleryShow','galleryDelete','galleryStart','galleryStop','gallerySlot','galleryInterval'])el(id).disabled=!ready||busy||!galleryCharacteristic;
   el('gallerySave').disabled=!ready||busy||!galleryCharacteristic||!prepared;
+  if(typeof updateGalleryBatch==='function')updateGalleryBatch(ready,busy);
 }
 function galleryId(){let id;do{id=crypto.getRandomValues(new Uint32Array(1))[0];}while(!id);return id;}
-async function galleryCommand(op,value){
+async function galleryCommand(op,value,slot=Number(el('gallerySlot').value)){
   const c=galleryCharacteristic,d=device;
   const check=()=>{if(!c||device!==d||!d.gatt.connected)throw Error('Gallery disconnected');};
-  galleryState=await GalleryBLE.command({write:async a=>{check();await bounded(c.writeValueWithResponse?c.writeValueWithResponse(a):c.writeValue(a));},read:async()=>{check();return new TextDecoder().decode(await bounded(c.readValue()));}},op,galleryId(),Number(el('gallerySlot').value),value);
+  galleryState=await GalleryBLE.command({write:async a=>{check();await bounded(c.writeValueWithResponse?c.writeValueWithResponse(a):c.writeValue(a));},read:async()=>{check();return new TextDecoder().decode(await bounded(c.readValue()));}},op,galleryId(),slot,value);
   el('galleryStatus').textContent=`Saved slots: ${Array.from({length:galleryState.slots},(_,i)=>galleryState.mask&(1<<i)?i+1:null).filter(Boolean).join(', ')||'none'}. Slideshow ${galleryState.running?'ON':'OFF'}.`;
   report('Device gallery command completed.');
 }

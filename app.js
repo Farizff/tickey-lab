@@ -37,8 +37,8 @@ el('connect').addEventListener('click',()=>run(async()=>{
 el('disconnect').addEventListener('click',()=>{if(device)device.gatt.disconnect();});
 el('read').addEventListener('click',()=>run(async()=>report('Device status: '+new TextDecoder().decode(await bounded(tx.readValue())))));
 el('send').addEventListener('click',()=>run(sendPrepared));
-async function sendPrepared(){
-  const bytes=prepared.bytes.slice(),palette=prepared.palette;
+async function sendPrepared(payload=prepared){
+  const bytes=payload.bytes.slice(),palette=payload.palette;
   let id;do{id=crypto.getRandomValues(new Uint32Array(1))[0];}while(!id);
   const currentDevice=device,currentRX=rx,currentTX=tx;
   function check(){if(device!==currentDevice||!currentDevice.gatt.connected)throw Error('Bluetooth disconnected');}
@@ -82,6 +82,7 @@ function renderPhoto(){
   update();
 }
 el('photo').addEventListener('change',async()=>{
+  if(el('photo').files.length>1){await prepareGalleryBatch(el('photo').files);return;}
   const revision=++epoch;sourceImage=null;sourceBlob=null;prepared=null;photoLoading=true;update();
   for(const id of ['cropCanvas','preview'])el(id).getContext('2d').clearRect(0,0,el(id).width,el(id).height);
   const file=el('photo').files[0];if(!file){photoLoading=false;photoError('Choose a JPEG or PNG.');document.dispatchEvent(new Event('designphoto'));return;}
