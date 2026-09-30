@@ -1,4 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
+test('photo picker requests the image library without forcing camera capture',()=>{const html=require('node:fs').readFileSync(require('node:path').join(__dirname,'index.html'),'utf8'),input=html.match(/<input\b[^>]*\bid="photo"[^>]*>/)[0];assert.match(input,/\baccept="image\/\*"/);assert.doesNotMatch(input,/\bcapture(?:\s|=|>)/);});
 const QR=require('./qr_codec.js'),Photo=require('./photo_codec.js'),Rich=require('./rich_text.js'),decode=require('./tests/vendor/jsQR.js');
 for(const text of ['https://example.com/tickey','Hello TICKEY','Halo café 日本 😀','a'.repeat(180)])test('independent decoder reads actual packed raster: '+text.slice(0,30),()=>{
  const q=QR.render(text),encoded=Photo.encode(Rich.toWire(q.codes,0)),wire=Photo.decode(encoded),logical=Rich.fromWire(wire,0);
