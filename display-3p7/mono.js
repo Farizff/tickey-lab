@@ -11,15 +11,22 @@ const Mono=(()=>{
   function crop(w,h,x=50,y=50,zoom=1){if(![w,h,x,y,zoom].every(Number.isFinite)||w<=0||h<=0||x<0||x>100||y<0||y>100||zoom<1||zoom>3)throw Error('Invalid crop');const s=Math.min(w/W,h/H)/zoom;return[(w-W*s)*x/100,(h-H*s)*y/100,W*s,H*s];}
   function frame(op,id,n=5){const a=new Uint8Array(n);a[0]=op;new DataView(a.buffer).setUint32(1,id,true);return a;}
   function begin(id,bytes){if(!Number.isInteger(id)||id<=0||id>0xffffffff||!(bytes instanceof Uint8Array)||bytes.length!==SIZE)throw Error('Invalid image metadata');const a=frame(1,id,17),v=new DataView(a.buffer);v.setUint16(5,W,true);v.setUint16(7,H,true);a[9]=1;v.setUint16(10,SIZE,true);v.setUint32(12,crc32(bytes),true);a[16]=37;return a;}
-  function requireCapability(s){if(s!==CAP)throw Error('Wrong firmware: requires TICKEY-3P7 MON1, not the 2.9-inch app.');}
+  function requireCapability(s){if(s!==CAP&&s!=='MON1:416:240:1:FAST1:180')throw Error('Wrong firmware: requires TICKEY-3P7 MON1, not the 2.9-inch app.');}
   async function send(io,bytes,id,progress=()=>{},env={}){
     const now=env.now||(()=>performance.now()),sleep=env.sleep||(ms=>new Promise(r=>setTimeout(r,ms)));
     requireCapability(io.capability);bytes=bytes.slice();const header=begin(id,bytes),tag=hex(id),start=now();
     async function wait(accept,limit){const end=now()+limit;do{const s=await io.read();if(s.startsWith(`ERR:${tag}:`))throw Error(s);if(accept(s))return s;await sleep(50);}while(now()<end);throw Error('Acknowledgement timeout; disconnect, then retry manually.');}
     const initial=await io.read();if(initial==='MON1:FAULT')throw Error('Panel fault; check device.');if(/^(RECV|VERIFIED|REFRESH):/.test(initial))throw Error('Device busy');if(initial!=='MON1:READY'&&!/^(DONE|ABORT|ERR):/.test(initial))throw Error('Wrong protocol status');
+    let frameSize=20;
+    if(io.capability==='MON1:416:240:1:FAST1:180'){
+      const probe=frame(5,id,180);for(let i=5;i<180;i++)probe[i]=i^probe[1+(i%4)];
+      try{await io.write(probe);await wait(s=>s===`PROBE:${tag}:180`,1500);frameSize=180;}
+      catch(error){if(!['InvalidModificationError','NotSupportedError'].includes(error.name)&&error.message!==`ERR:${tag}:PROBE`)throw error;}
+    }
+    const mode=frameSize===180?'fast':'legacy';progress({stage:'negotiated',mode,frameSize,bytes:0,total:SIZE});
     await io.write(header);await wait(s=>s===`RECV:${tag}:0`,5000);
-    for(let off=0,n=0;off<SIZE;n++){const count=Math.min(13,SIZE-off),a=frame(2,id,count+7);new DataView(a.buffer).setUint16(5,off,true);a.set(bytes.subarray(off,off+count),7);await io.write(a);off+=count;if(n%16===15||off===SIZE){await wait(s=>s===`RECV:${tag}:${off}`,5000);progress(`Sending ${Math.round(off/SIZE*100)}%`);}}
-    await io.write(frame(3,id));const accepted=await wait(s=>s===`VERIFIED:${tag}`||s===`REFRESH:${tag}`||s.startsWith(`DONE:${tag}:`),5000);const transferMs=now()-start;progress('Refreshing panel — do not power off');const done=accepted.startsWith('DONE:')?accepted:await wait(s=>s.startsWith(`DONE:${tag}:`),45000);const panelMs=Number(done.split(':')[2]);if(!Number.isFinite(panelMs))throw Error('Invalid timing');return{transferMs,panelMs};
+    for(let off=0,n=0;off<SIZE;n++){const count=Math.min(frameSize-7,SIZE-off),a=frame(2,id,count+7);new DataView(a.buffer).setUint16(5,off,true);a.set(bytes.subarray(off,off+count),7);await io.write(a);off+=count;if(n%16===15||off===SIZE){await wait(s=>s===`RECV:${tag}:${off}`,5000);progress({stage:'sending',bytes:off,total:SIZE});}}
+    await io.write(frame(3,id));const accepted=await wait(s=>s===`VERIFIED:${tag}`||s===`REFRESH:${tag}`||s.startsWith(`DONE:${tag}:`),5000);const transferMs=now()-start;progress({stage:'refreshing',bytes:SIZE,total:SIZE,transferMs});const done=accepted.startsWith('DONE:')?accepted:await wait(s=>s.startsWith(`DONE:${tag}:`),45000);const panelMs=Number(done.split(':')[2]);if(!Number.isFinite(panelMs))throw Error('Invalid timing');return{transferMs,panelMs,mode,frameSize};
   }
   return{W,H,SIZE,CAP,SERVICE,uuid,crc32,pack,preview,quantize,crop,frame,begin,requireCapability,send};
 })();
